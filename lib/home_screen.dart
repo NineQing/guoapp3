@@ -1118,8 +1118,7 @@ class _HomeScreenState extends State<HomeScreen> {
           (_tabDiscover, Icons.home_rounded, '主页'),
           (_tabFeed, Icons.play_circle_rounded, '在看'),
           (_tabFollow, Icons.bookmark_rounded, '追剧'),
-          if (widget.store.canShowLive)
-            (_tabLive, Icons.live_tv_rounded, '直播'),
+          if (widget.store.canShowLive) (_tabLive, Icons.live_tv_rounded, '直播'),
           if (widget.store.canDownload)
             (_tabDownloads, Icons.download_rounded, '下载'),
         ];
@@ -1809,9 +1808,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                         : Text(
                                             '已经看到这里的全部剧集',
                                             style: TextStyle(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
                                               fontSize: 12,
                                             ),
                                           ),
