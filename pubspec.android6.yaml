@@ -42,6 +42,7 @@ dependency_overrides:
     path: packages/file_picker_android6_stub
   flutter_foreground_task:
     path: packages/flutter_foreground_task_android6_stub
+  shared_preferences_android: 2.2.2
   nsd:
     path: packages/nsd_android6_stub
   media_kit_libs_windows_video:
