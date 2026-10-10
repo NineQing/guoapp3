@@ -289,6 +289,10 @@ class LocalStore extends ChangeNotifier {
 
   bool get storagePromptShown => _bool('storagePromptShown') ?? false;
 
+  bool get liveActivated =>
+      allSourcesEnabled || (_bool('liveActivated') ?? false);
+  bool get canShowLive => allSourcesEnabled || liveActivated;
+
   bool get autoExport =>
       !android6Compatibility && !locked && (_bool('autoExport') ?? false);
 
@@ -466,6 +470,10 @@ class LocalStore extends ChangeNotifier {
       _setting('exportPosters', value, admin: true);
   Future<void> setAutoExport(bool value) =>
       _setting('autoExport', value, admin: true);
+  Future<void> setLiveActivated(bool value) {
+    if (allSourcesEnabled) return Future<void>.value();
+    return _setting('liveActivated', value);
+  }
   Future<void> setGreenMode(bool value) => _setting('greenMode', value);
   Future<void> setFullMode(bool value) async {
     if (!allSourcesEnabled) return;

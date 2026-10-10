@@ -41,6 +41,7 @@ class LocalSnapshot {
     'fullMode',
     'exportDirectory',
     'storagePromptShown',
+    'liveActivated',
   };
   final SharedPreferences preferences;
   final SnapshotEncoder encoder = SnapshotEncoder();
@@ -89,6 +90,7 @@ class LocalSnapshot {
         'greenMode',
         'fullMode',
         'storagePromptShown',
+        'liveActivated',
       }.contains(entry.key.split('.').last);
       if (!owns(entry.key) ||
           (boolean ? entry.value is! bool : entry.value is! String)) {
