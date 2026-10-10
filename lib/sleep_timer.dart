@@ -141,8 +141,10 @@ Future<void> showSleepTimerSheet(
     SleepTimerChoice.minutes90,
     if (showFinishEpisode) SleepTimerChoice.finishEpisode,
   ];
-  final choice = await showDialog<Object>(
+  final choice = await showGeneralDialog<Object>(
     context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: Colors.black26,
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(
@@ -158,7 +160,7 @@ Future<void> showSleepTimerSheet(
         ),
       );
     },
-    builder: (dialogContext) => Theme(
+    pageBuilder: (dialogContext, _, _) => Theme(
       data: AppTheme.dark,
       child: AnimatedBuilder(
         animation: controller,
