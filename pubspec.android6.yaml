@@ -18,7 +18,7 @@ dependencies:
   path: 1.9.1
   path_provider: 2.1.5
   shared_preferences: 2.5.5
-  flutter_foreground_task: 11.0.3
+  flutter_foreground_task: 9.2.2
   ffmpeg_kit_flutter_new_min_gpl: 2.6.2
   file_picker: 11.0.3
   crypto: 3.0.7
