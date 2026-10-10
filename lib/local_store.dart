@@ -137,7 +137,8 @@ class LocalStore extends ChangeNotifier {
     return _bool('forceLogin') ?? admin.protected;
   }
 
-  bool get canDownload => !locked && (profile.admin || profile.download);
+  bool get canDownload =>
+      !android6Compatibility && !locked && (profile.admin || profile.download);
 
   /// 绿色模式并进入口本身而不是只过滤站源列表：榜单、搜索、推荐、资料库、
   /// 下载与局域网同步都有直接按站源 id 取用的路径，只在列表处过滤会漏掉它们。
@@ -288,7 +289,8 @@ class LocalStore extends ChangeNotifier {
 
   bool get storagePromptShown => _bool('storagePromptShown') ?? false;
 
-  bool get autoExport => !locked && (_bool('autoExport') ?? false);
+  bool get autoExport =>
+      !android6Compatibility && !locked && (_bool('autoExport') ?? false);
 
   /// 绿色开关：默认开启，成人点播与成人直播一律不展示。
   /// 全站源版默认保持完整模式，关闭后才启用绿色内容过滤。

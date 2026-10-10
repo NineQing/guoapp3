@@ -1,0 +1,8 @@
+name: ffmpeg_kit_flutter_new_min_gpl
+description: Android 6 compatibility stub for the local media pipeline.
+publish_to: none
+version: 2.6.2
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+

@@ -1,0 +1,77 @@
+name: Build Android 6 compatibility package
+
+on:
+  push:
+    tags: ['android6-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android6-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
+jobs:
+  android6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+          cache: true
+      - name: Install Android NDK and SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
+      - name: Configure Android 6 toolchain
+        run: |
+          cp pubspec.android6.yaml pubspec.yaml
+          python scripts/prepare_android6_toolchain.py
+      - name: Configure Android signing
+        run: python scripts/configure_signing.py
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - run: python scripts/build_android6.py
+      - name: Remove signing files
+        if: always()
+        run: python scripts/configure_signing.py --clean
+      - name: Publish Android 6 compatibility release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'^version:\s*(\\S+)', pathlib.Path('pubspec.yaml').read_text(encoding='utf-8'), re.M).group(1))")
+          RELEASE_VERSION="${VERSION%%+*}"
+          TAG="android6-${RELEASE_VERSION}"
+          gh release create "$TAG" \
+            --title "红果鉴 Android 6 兼容版 ${RELEASE_VERSION}" \
+            --notes "红果鉴 Android 6（API 23）兼容版，独立包名与正式版并存。该版本用于浏览、搜索、详情和在线播放；下载、合并、导出等本地媒体处理不包含在兼容版中。" || true
+          gh release upload "$TAG" dist/android6/* --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hongguojian-android6
+          path: dist/android6/*
+          if-no-files-found: error
+          retention-days: 14

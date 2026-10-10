@@ -1,8 +1,8 @@
 # 红果鉴 / 真果鉴
 
-Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.149+2160（未验证开发快照）**。本轮在保留红果鉴默认版和现有构建流程的前提下，追加直播、推荐与搜索缓存、剧库导入导出、播放器生命周期与玻璃界面、网络出口切换、屏幕常亮、观看统计、断点续传与新增站源解析等上游功能。
+Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.150+2161（未验证开发快照）**。本轮在保留红果鉴默认版和现有构建流程的前提下，追加 Android 6 独立兼容版构建入口；完整主版本的直播、推荐与搜索缓存、剧库导入导出、播放器生命周期与玻璃界面、网络出口切换、屏幕常亮、观看统计、断点续传与新增站源解析等功能继续保留。
 
-按用户 2026-09-21 的要求，继续暂停整体验证。0.2.51 的 GitHub Actions 构建、打包和 Release 记录保留，现有 `.github/workflows/build.yml` 及构建脚本本轮未改动；0.2.149+2160 尚未重新构建或上传安装包。启动、榜单、画质增强、站源改名、画中画、连续播放控制栏、红果系列剧提醒、播放器 Tab 化、首页 / 播放页优化、多站源站源修复、十二个新增站源、直播、推荐、剧库传输、播放器生命周期和历史记录批量删除均保留未验证快照状态。
+按用户 2026-09-21 的要求，继续暂停整体验证。0.2.51 的 GitHub Actions 构建、打包和 Release 记录保留，现有 `.github/workflows/build.yml` 未改动；0.2.150+2161 尚未重新构建或上传安装包。启动、榜单、画质增强、站源改名、画中画、连续播放控制栏、红果系列剧提醒、播放器 Tab 化、首页 / 播放页优化、多站源站源修复、十二个新增站源、直播、推荐、剧库传输、播放器生命周期、历史记录批量删除和 Android 6 兼容版均保留未验证快照状态。
 
 | 编译方式 | 应用名称 | 可用站源 |
 | --- | --- | --- |
@@ -14,6 +14,12 @@ Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、�
 这是编译选项，应用内不能切换版本。标题、Android 桌面名称与电视横幅、Windows 窗口与分发文件名、iOS 显示名随编译选项变化。界面、站源调用、原生下载调度同时限制可用站源；红果版不会访问或继续执行其他站源的旧任务。
 
 两版保留原 Android / iOS 应用标识及数据目录；Android 使用同一签名可相互覆盖升级，不能作为两个独立正式应用并排安装。Windows 沿用原内部产品标识与数据目录。切换版本保留追剧、观看记录、用户权限和下载记录；红果版隐藏其他站源内容，恢复全站源版后可继续使用。备份格式也保持兼容。
+
+### Android 6 兼容版
+
+兼容版通过独立的 `android6-*` Release 发布，包名为 `com.duanju.duanju_app.android6`，可与 Android 8+ 正式版并存。它使用旧版 Flutter / Gradle、API 23 原生核心和独立依赖解析，不改主版本的最低系统要求，也不会触发现有正式版工作流。
+
+兼容版定位为低版本电视和手机的在线播放版，保留浏览、搜索、详情、选集和在线播放；下载、后台下载、本地合并、媒体导出及 HEIC 海报转换不提供。应用名称带“兼容版”后缀，避免与正式版混淆。该版本只作为未验证开发快照，需待 GitHub Actions 构建完成后再进行 Android 6 实机验收。
 
 ## 使用
 
@@ -633,6 +639,7 @@ SR-1、SR-2 与 SR-4 已接入源码，小型动漫 CNN 也包含在本轮；SR-
 | 平台 | 包与状态 |
 | --- | --- |
 | Android 8.0+ 手机 | `0.2.51+57` 两版 ARMv7 / ARM64 / x86_64 APK 已由 Actions 构建并发布，真实安装与运行仍待验收 |
+| Android 6.0+ 兼容版 | `android6-0.2.150` 独立红果鉴 APK 由兼容工作流手动构建和发布，在线播放保留，下载与本地媒体处理不提供；当前待 Actions 构建与实机验收 |
 | Windows 10/11 x64 | `0.2.51+57` 两版完整 ZIP 已由 Actions 构建并发布；解压后分别运行 `hongguojian.exe` 或 `zhenguojian.exe`，保留所有 DLL 和 `data`；局域网原生发现依赖 Windows 10 1903+，包启动与设备互联仍待验证 |
 | Android TV | 与手机共用 `0.2.51+57` Android 包；已补强自动识别与电视模式横屏，待电视 / 盒子实机验收；0.2.12 选集 / 设置及 0.2.13 同步仍待集中验证 |
 | iOS 15.1+ | `0.2.51+57` 两版未签名 IPA 已由 Actions 构建并发布；0.2.40 起播放页禁用 media_kit_video 硬件纹理加速以规避 libmpv OpenGL ES 渲染上下文失败直接退出；仍待签名安装与真机验收 |
@@ -662,6 +669,8 @@ SR-1、SR-2 与 SR-4 已接入源码，小型动漫 CNN 也包含在本轮；SR-
 
 Actions 分别传入默认参数与 `--all-sources` 构建两版，Flutter 和 Go 回归也覆盖两种编译配置。产物保留 14 天，不自动创建 GitHub Release。首次平台构建结果以实际 Actions 输出为准。
 
+**Build Android 6 compatibility package** 仅在手动运行或推送 `android6-*` 标签时执行。它使用 `pubspec.android6.yaml`、Flutter `3.35.7` 和 Android API 23 原生编译，产物为 `hongguojian-android6-版本-ABI.apk`，上传到 `android6-版本` Release 和 `hongguojian-android6` Artifact；现有 **Build app packages** 工作流及其 Release 规则不变。
+
 Android 正式发布持续使用同一签名并递增构建号，在仓库 Secrets 配置：
 
 | Secret | 内容 |
@@ -688,7 +697,7 @@ keyPassword=你的密码
 
 ## 开发与构建
 
-Flutter `3.47.4`、Dart `3.12+`、Go `1.24.1+`、Python `3.10+`。Android 需要 JDK 17、SDK 36、NDK `28.2.13676358`；Windows 需要 Visual Studio 的 C++ 桌面组件及 MinGW-w64 x64；iOS 需要 macOS、完整 Xcode 和 CocoaPods。
+正式版使用 Flutter `3.47.4`、Dart `3.12+`、Go `1.24.1+`、Python `3.10+`。Android 正式版需要 JDK 17、SDK 36、NDK `28.2.13676358`；Windows 需要 Visual Studio 的 C++ 桌面组件及 MinGW-w64 x64；iOS 需要 macOS、完整 Xcode 和 CocoaPods。Android 6 兼容版仅由 GitHub Actions 使用 Flutter `3.35.7`、Android API 23 和 `scripts/build_android6.py` 构建，不纳入本地正式版构建命令。
 
 将 Flutter、Go、Python 加入 PATH，Android 设置 `ANDROID_HOME`。构建脚本对子进程默认设置 `GOPROXY=https://goproxy.cn,direct`、`GOSUMDB=off`，不改全局配置；同名环境变量可覆盖。
 

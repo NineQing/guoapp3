@@ -13,6 +13,9 @@ val dartDefines = providers.gradleProperty("dart-defines").orNull.orEmpty()
         decoded.substringBefore("=") to decoded.substringAfter("=", "")
     }
 val allSources = dartDefines["ALL_SOURCES"] == "true"
+val android6Compatibility = dartDefines["ANDROID6_COMPAT"] == "true"
+val editionLabel = if (allSources) "真果鉴" else "红果鉴"
+val appLabel = editionLabel + if (android6Compatibility) "兼容版" else ""
 
 val releaseKey = rootProject.file("key.properties")
 val releaseProperties = Properties()
@@ -31,13 +34,17 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.duanju.duanju_app"
-        minSdk = 26
+        applicationId = if (android6Compatibility) {
+            "com.duanju.duanju_app.android6"
+        } else {
+            "com.duanju.duanju_app"
+        }
+        minSdk = if (android6Compatibility) 23 else 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        manifestPlaceholders["appLabel"] = if (allSources) "真果鉴" else "红果鉴"
-        manifestPlaceholders["appLabelFull"] = if (allSources) "真果鉴" else "红果鉴"
+        manifestPlaceholders["appLabel"] = appLabel
+        manifestPlaceholders["appLabelFull"] = appLabel
         manifestPlaceholders["appBanner"] = if (allSources) "@drawable/tv_banner_all_sources" else "@drawable/tv_banner"
         manifestPlaceholders["appBannerFull"] = if (allSources) "@drawable/tv_banner_all_sources" else "@drawable/tv_banner"
     }
