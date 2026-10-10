@@ -1,0 +1,7 @@
+name: flutter_foreground_task
+description: API-only compatibility stub for the Android 6 build.
+publish_to: none
+version: 11.0.3
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
