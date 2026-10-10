@@ -1,7 +1,9 @@
+import 'dart:typed_data';
+
 class PickedFile {
   Future<int?> length() async => null;
 
-  Future<List<int>> readAsBytes() async => const [];
+  Future<Uint8List> readAsBytes() async => Uint8List(0);
 }
 
 enum FileType { any, audio, custom, image, media, video }
