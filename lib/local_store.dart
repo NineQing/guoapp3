@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_build.dart';
+import 'launcher_icon.dart';
 import 'local_profiles.dart';
+import 'watch_stats.dart';
 import 'local_snapshot.dart';
 import 'models.dart';
 import 'playback_preferences.dart';
@@ -15,6 +18,10 @@ import 'lan_sync_models.dart';
 
 part 'local_store_sync.dart';
 
+class LibraryChanges extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
 class LocalStore extends ChangeNotifier {
   LocalStore(this.preferences) {
     _initialize();
@@ -22,12 +29,15 @@ class LocalStore extends ChangeNotifier {
 
   final SharedPreferences preferences;
   LocalSnapshot? _snapshot;
+  final LibraryChanges _libraryChanges = LibraryChanges();
+  Listenable get libraryChanges => _libraryChanges;
   LanDocument? _lanDocumentCache;
   int _lanRevision = 0;
   int _lanUrgentRevision = 0;
   int get lanRevision => _lanRevision;
   int get lanUrgentRevision => _lanUrgentRevision;
   final Map<String, WatchEntry> _history = {};
+  final Map<String, String> _historyRows = {};
   final Map<String, Drama> _favorites = {};
   final Map<String, FollowState> _followStates = {};
   final Map<String, Drama> _seriesCandidates = {};
@@ -93,6 +103,7 @@ class LocalStore extends ChangeNotifier {
     ];
     _current = 'default';
     _history.clear();
+    _historyRows.clear();
     _favorites.clear();
     _followStates.clear();
     _seriesCandidates.clear();
@@ -100,7 +111,14 @@ class LocalStore extends ChangeNotifier {
   }
 
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _libraryChanges.notify();
+    notifyListeners();
+  }
+
+  void _notifyLibrary() {
+    if (_disposed) return;
+    _libraryChanges.notify();
   }
 
   String? _string(String key) => _snapshot?.getString(key);
@@ -120,14 +138,21 @@ class LocalStore extends ChangeNotifier {
   }
 
   bool get canDownload => !locked && (profile.admin || profile.download);
+
+  /// 绿色模式并进入口本身而不是只过滤站源列表：榜单、搜索、推荐、资料库、
+  /// 下载与局域网同步都有直接按站源 id 取用的路径，只在列表处过滤会漏掉它们。
   bool allowsSource(String source) =>
-      !locked && SourceSite.isAvailable(source) && profile.allows(source);
+      !locked &&
+      SourceSite.isAvailable(source) &&
+      (!greenMode || !SourceSite.isAdult(source)) &&
+      profile.allows(source);
   List<SourceSite> get sources =>
       SourceSite.values.where((site) => allowsSource(site.id)).toList();
 
   void _loadLibrary() {
     _lanDocumentCache = null;
     _history.clear();
+    _historyRows.clear();
     _favorites.clear();
     _followStates.clear();
     _seriesCandidates.clear();
@@ -136,6 +161,7 @@ class LocalStore extends ChangeNotifier {
       try {
         final entry = WatchEntry.fromJson(row);
         _history[entry.drama.id] = entry;
+        _historyRows[entry.drama.id] = jsonEncode(row);
       } catch (_) {}
     }
     for (final row in readJsonList(_string(_key('favorites')))) {
@@ -246,7 +272,29 @@ class LocalStore extends ChangeNotifier {
     return {'light', 'dark', 'system'}.contains(value) ? value! : 'system';
   }
 
+  String get interfaceStyle {
+    final value = _configurationError == null
+        ? _string('interfaceStyle')
+        : null;
+    return {'standard', 'glass'}.contains(value) ? value! : 'standard';
+  }
+
+  String get exportDirectory {
+    final value = _configurationError == null
+        ? _string('exportDirectory')
+        : null;
+    return value ?? '';
+  }
+
+  bool get storagePromptShown => _bool('storagePromptShown') ?? false;
+
   bool get autoExport => !locked && (_bool('autoExport') ?? false);
+
+  /// 绿色开关：默认开启，成人点播与成人直播一律不展示。
+  /// 全站源版默认保持完整模式，关闭后才启用绿色内容过滤。
+  bool get fullMode => allSourcesEnabled && (_bool('fullMode') ?? true);
+  bool get greenMode =>
+      allSourcesEnabled && (!fullMode || (_bool('greenMode') ?? true));
   bool get exportPosters => !locked && (_bool('exportPosters') ?? false);
   String get source {
     if (locked) return '';
@@ -265,6 +313,17 @@ class LocalStore extends ChangeNotifier {
       );
     } catch (_) {
       return const DownloadPreferences();
+    }
+  }
+
+  WatchStats get watchStats {
+    if (locked) return const WatchStats();
+    try {
+      return WatchStats.fromJson(
+        jsonDecode(_string(_key('watchStats')) ?? '{}'),
+      );
+    } catch (_) {
+      return const WatchStats();
     }
   }
 
@@ -349,6 +408,7 @@ class LocalStore extends ChangeNotifier {
     bool trackSync = true,
     bool syncUrgent = true,
     Set<String> clearSyncProgress = const {},
+    Map<String, WatchEntry>? historyOverride,
   }) async {
     final snapshot = _snapshot;
     if (snapshot == null) throw StateError('请先恢复本地配置');
@@ -362,6 +422,7 @@ class LocalStore extends ChangeNotifier {
         values,
         keys: {...changes.keys, ...remove},
         clearProgress: clearSyncProgress,
+        historyOverride: historyOverride,
       );
     }
     values.putIfAbsent(
@@ -403,6 +464,14 @@ class LocalStore extends ChangeNotifier {
       _setting('exportPosters', value, admin: true);
   Future<void> setAutoExport(bool value) =>
       _setting('autoExport', value, admin: true);
+  Future<void> setGreenMode(bool value) => _setting('greenMode', value);
+  Future<void> setFullMode(bool value) async {
+    if (!allSourcesEnabled) return;
+    if (!value) await _setting('greenMode', true);
+    await _setting('fullMode', value);
+    await LauncherIcon.apply(value);
+  }
+
   Future<void> setForceLogin(bool value) =>
       _setting('forceLogin', value, admin: true);
   Future<void> setHideVip(bool value) => _setting(_key('hideVip'), value);
@@ -419,6 +488,17 @@ class LocalStore extends ChangeNotifier {
       {'light', 'dark', 'system'}.contains(value)
       ? _setting('themeMode', value)
       : Future.value();
+
+  Future<void> setInterfaceStyle(String value) =>
+      {'standard', 'glass'}.contains(value)
+      ? _setting('interfaceStyle', value)
+      : Future.value();
+
+  Future<void> setExportDirectory(String value) =>
+      _setting('exportDirectory', value);
+  Future<void> setStoragePromptShown(bool value) =>
+      _setting('storagePromptShown', value);
+
   Future<void> setPlaybackPreferences(PlaybackPreferences value) {
     PlaybackPreferences.fromJson(value.toJson());
     return _setting(_key('playback'), jsonEncode(value.toJson()));
@@ -510,10 +590,19 @@ class LocalStore extends ChangeNotifier {
     });
   }
 
-  Future<void> saveWatch(WatchEntry entry) {
+  Future<void> saveWatch(
+    WatchEntry entry, {
+    double watchSeconds = 0,
+    int completedEpisodes = 0,
+  }) {
     final epoch = _epoch;
     return _queue(() async {
       if (!allowsSource(entry.drama.source) || epoch != _epoch) return;
+      final stats = watchStats.addSample(
+        source: entry.drama.source,
+        seconds: watchSeconds,
+        episodes: completedEpisodes,
+      );
       final previous = _history[entry.drama.id]?.drama;
       final current = previous == null
           ? entry
@@ -528,29 +617,58 @@ class LocalStore extends ChangeNotifier {
       final sorted = entries.values.toList()
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       final following = _followStates[entry.drama.id];
-      final states = Map.of(_followStates);
-      final favorites = Map.of(_favorites);
+      final states = following == null ? null : Map.of(_followStates);
+      final favorites = following == null ? null : Map.of(_favorites);
       if (following != null) {
-        states[entry.drama.id] = following.afterPlayback(current);
-        favorites[entry.drama.id] = favorites[entry.drama.id]!.merge(
+        states![entry.drama.id] = following.afterPlayback(current);
+        favorites![entry.drama.id] = favorites[entry.drama.id]!.merge(
           current.drama,
         );
       }
-      await _commit({
-        _key('history'): jsonEncode(
-          sorted.take(300).map((entry) => entry.toJson()).toList(),
-        ),
-        if (following != null) ...{
-          _key('followStates'): _encodeFollowStates(states),
-          _key('favorites'): jsonEncode(
-            favorites.values.map((entry) => entry.toJson()).toList(),
+      final row = jsonEncode(current.toJson());
+      final kept = sorted.take(300).toList();
+      await _commit(
+        {
+          _key('watchStats'): jsonEncode(stats.toJson()),
+          _key('history'): _historyContent(
+            kept,
+            overrides: {entry.drama.id: row},
           ),
+          if (following != null) ...{
+            _key('followStates'): _encodeFollowStates(states!),
+            _key('favorites'): jsonEncode(
+              favorites!.values.map((entry) => entry.toJson()).toList(),
+            ),
+          },
         },
-      }, syncUrgent: false);
-      _loadLibrary();
-      _notify();
+        syncUrgent: false,
+        historyOverride: {for (final item in kept) item.drama.id: item},
+      );
+      _lanDocumentCache = null;
+      _historyRows[entry.drama.id] = row;
+      _history
+        ..clear()
+        ..addEntries(kept.map((row) => MapEntry(row.drama.id, row)));
+      _historyRows.removeWhere((id, _) => !_history.containsKey(id));
+      if (following != null) {
+        _followStates[entry.drama.id] = states![entry.drama.id]!;
+        _favorites[entry.drama.id] = favorites![entry.drama.id]!;
+      }
+      if (following != null &&
+          _encodeFollowStates({entry.drama.id: following}) !=
+              _encodeFollowStates({entry.drama.id: states![entry.drama.id]!})) {
+        _notify();
+        return;
+      }
+      _notifyLibrary();
     });
   }
+
+  String _historyContent(
+    Iterable<WatchEntry> entries, {
+    Map<String, String> overrides = const {},
+  }) =>
+      '[${entries.map((entry) => overrides[entry.drama.id] ?? _historyRows[entry.drama.id] ?? jsonEncode(entry.toJson())).join(',')}]';
 
   WatchEntry? mediaWatched(String id) {
     if (!canDownload) return null;
@@ -565,7 +683,12 @@ class LocalStore extends ChangeNotifier {
     }
   }
 
-  Future<void> saveMediaWatch(String id, WatchEntry entry) {
+  Future<void> saveMediaWatch(
+    String id,
+    WatchEntry entry, {
+    double watchSeconds = 0,
+    int completedEpisodes = 0,
+  }) {
     final epoch = _epoch;
     return _queue(() async {
       if (!canDownload ||
@@ -579,7 +702,15 @@ class LocalStore extends ChangeNotifier {
       while (data.length > 300) {
         data.remove(data.keys.first);
       }
-      await _commit({_key('mediaHistory'): jsonEncode(data)});
+      final stats = watchStats.addSample(
+        source: entry.drama.source,
+        seconds: watchSeconds,
+        episodes: completedEpisodes,
+      );
+      await _commit({
+        _key('mediaHistory'): jsonEncode(data),
+        _key('watchStats'): jsonEncode(stats.toJson()),
+      });
     });
   }
 
@@ -597,20 +728,19 @@ class LocalStore extends ChangeNotifier {
     });
   }
 
-  Future<void> removeHistory(String id) => removeHistories([id]);
-
-  Future<void> removeHistories(Iterable<String> ids) {
+  Future<void> removeHistory(String id) {
     final epoch = _epoch;
-    final idSet = ids.where((id) => watched(id) != null).toSet();
     return _queue(() async {
-      if (idSet.isEmpty || epoch != _epoch) return;
-      final entries = Map.of(_history);
-      entries.removeWhere((key, _) => idSet.contains(key));
-      await _commit({
-        _key('history'): jsonEncode(
-          entries.values.map((entry) => entry.toJson()).toList(),
-        ),
-      }, clearSyncProgress: idSet);
+      if (watched(id) == null || epoch != _epoch) return;
+      final entries = Map.of(_history)..remove(id);
+      await _commit(
+        {
+          _key('history'): jsonEncode(
+            entries.values.map((entry) => entry.toJson()).toList(),
+          ),
+        },
+        clearSyncProgress: {id},
+      );
       _loadLibrary();
       _notify();
     });
@@ -866,7 +996,10 @@ class LocalStore extends ChangeNotifier {
       'profiles': _profiles.map((profile) => profile.toJson()).toList(),
       'displayMode': displayMode,
       'themeMode': themeMode,
+      'interfaceStyle': interfaceStyle,
       'autoExport': autoExport,
+      'greenMode': greenMode,
+      'fullMode': fullMode,
       'exportPosters': exportPosters,
       'forceLogin': forceLogin,
       'libraries': {
@@ -883,6 +1016,9 @@ class LocalStore extends ChangeNotifier {
             ),
             'mediaHistory': jsonDecode(
               _string(_key('mediaHistory', profile.id)) ?? '{}',
+            ),
+            'watchStats': jsonDecode(
+              _string(_key('watchStats', profile.id)) ?? '{}',
             ),
             'source': _string(_key('source', profile.id)) ?? '',
             'hideVip': _bool(_key('hideVip', profile.id)) ?? true,
@@ -921,6 +1057,10 @@ class LocalStore extends ChangeNotifier {
         !{'light', 'dark', 'system'}.contains(data['themeMode'])) {
       throw const FormatException('备份主题设置无效');
     }
+    if (data.containsKey('interfaceStyle') &&
+        !{'standard', 'glass'}.contains(data['interfaceStyle'])) {
+      throw const FormatException('备份界面风格无效');
+    }
     if (data.containsKey('forceLogin') && data['forceLogin'] is! bool) {
       throw const FormatException('备份登录设置无效');
     }
@@ -941,6 +1081,7 @@ class LocalStore extends ChangeNotifier {
       for (final row in favorites) {
         Drama.fromJson(Map<String, dynamic>.from(row as Map));
       }
+      WatchStats.validateJson(library['watchStats']);
       final states = library['followStates'] as Map? ?? {};
       final seriesCandidates = library['seriesCandidates'] as List? ?? [];
       final favoriteIds = favorites.map((row) => (row as Map)['id']).toSet();
@@ -993,7 +1134,12 @@ class LocalStore extends ChangeNotifier {
           ? data['displayMode'] as String
           : 'auto',
       'themeMode': data['themeMode'] as String? ?? themeMode,
+      'interfaceStyle': {'standard', 'glass'}.contains(data['interfaceStyle'])
+          ? data['interfaceStyle'] as String
+          : 'standard',
       'autoExport': data['autoExport'] == true,
+      'greenMode': data['greenMode'] is bool ? data['greenMode'] as bool : true,
+      'fullMode': data['fullMode'] == true,
       'exportPosters': data['exportPosters'] == true,
       'forceLogin': data['forceLogin'] is bool
           ? data['forceLogin'] as bool
@@ -1018,6 +1164,9 @@ class LocalStore extends ChangeNotifier {
         ),
         _key('mediaHistory', profile.id): jsonEncode(
           library['mediaHistory'] ?? {},
+        ),
+        _key('watchStats', profile.id): jsonEncode(
+          WatchStats.fromJson(library['watchStats']).toJson(),
         ),
         _key('source', profile.id): library['source'] as String,
         _key('hideVip', profile.id): library['hideVip'] as bool,
@@ -1124,6 +1273,7 @@ class LocalStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _snapshot?.encoder.dispose();
     super.dispose();
   }
 }

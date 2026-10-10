@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
 import 'core_bridge.dart';
 import 'download_preferences.dart';
+import 'glass_panel.dart';
 import 'local_store.dart';
 import 'resource_settings.dart';
 import 'remote_widgets.dart';
@@ -27,28 +29,20 @@ class DownloadPreferencesScreen extends StatelessWidget {
                   title: const Text('默认画质'),
                   subtitle: const Text('指定画质不可用时，使用源站提供的可用版本。'),
                 ),
-                DropdownButtonFormField<int>(
-                  initialValue: preferences.quality,
-                  decoration: const InputDecoration(labelText: '下载画质'),
-                  items: [
+                GlassChoiceField<int>(
+                  value: preferences.quality,
+                  label: '下载画质',
+                  enabled: store.canDownload,
+                  entries: [
                     for (final value in DownloadPreferences.qualities)
-                      DropdownMenuItem(
-                        value: value,
-                        child: Text(value == 0 ? '自动 · 优先高清' : '${value}P'),
-                      ),
+                      (value, value == 0 ? '自动 · 优先高清' : '${value}P'),
                   ],
-                  onChanged: !store.canDownload
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            saveUserChange(
-                              context,
-                              () => store.setDownloadPreferences(
-                                preferences.copyWith(quality: value),
-                              ),
-                            );
-                          }
-                        },
+                  onChanged: (value) => saveUserChange(
+                    context,
+                    () => store.setDownloadPreferences(
+                      preferences.copyWith(quality: value),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 SwitchListTile(
@@ -153,9 +147,7 @@ class _ResourceSettingsScreenState extends State<ResourceSettingsScreen> {
       );
       if (!mounted || !_allowed) return;
       setState(() => _settings = settings);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('设置已保存，将用于后续请求和下载任务')));
+      AppNotice.show(context, '设置已保存，将用于后续请求和下载任务');
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

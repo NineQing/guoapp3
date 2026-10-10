@@ -34,8 +34,8 @@ func TestDuanjuRegistryKeepsDistinctIdentitiesFromExistingSources(t *testing.T) 
 	for _, source := range existing {
 		seen[source] = true
 	}
-	if len(duanjuProviderCatalog) != 12 {
-		t.Fatalf("duanju catalog should register 12 sources, got %d", len(duanjuProviderCatalog))
+	if len(duanjuProviderCatalog) != 27 {
+		t.Fatalf("duanju catalog should register 27 sources, got %d", len(duanjuProviderCatalog))
 	}
 	for _, spec := range duanjuProviderCatalog {
 		if seen[spec.ID] {
@@ -191,6 +191,30 @@ func TestDuanjuMaccmsParsesCardsAndPlaylist(t *testing.T) {
 	}
 }
 
+func TestDuanjuMaccmsDetailCoverSkipsOtherDramaPosters(t *testing.T) {
+	detail, err := html.Parse(strings.NewReader(`<html><body>
+	<div class="module-card-item"><a class="module-item-pic" href="/detail/200.html"><img data-original="/pic/foreign.jpg"></a></div>
+	<div class="module-item-pic"><a href="/detail/100.html"><img data-original="/pic/own.jpg"></a></div>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := maccmsDetailCover(detail, "https://www.example.cn", "100"); got != "https://www.example.cn/pic/own.jpg" {
+		t.Fatalf("detail cover picked a foreign poster: %q", got)
+	}
+
+	plain, err := html.Parse(strings.NewReader(`<html><body>
+	<a href="/detail/300.html"><img src="/pic/banner.jpg"></a>
+	<img data-src="/pic/own.jpg">
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := maccmsDetailCover(plain, "https://www.example.cn", "100"); got != "https://www.example.cn/pic/own.jpg" {
+		t.Fatalf("detail cover fallback picked a foreign poster: %q", got)
+	}
+}
+
 func TestDuanjuMaccmsPlayerParsingHandlesCommonShells(t *testing.T) {
 	playerShell := `<html><script>var player_aaaa={"flag":"1","url":"https:\/\/cdn.example.cn\/hls\/index.m3u8"}</script></html>`
 	if got := maccmsNormalizePlaybackURL(maccmsPlayerURL(playerShell)); got != "https://cdn.example.cn/hls/index.m3u8" {
@@ -203,6 +227,29 @@ func TestDuanjuMaccmsPlayerParsingHandlesCommonShells(t *testing.T) {
 	}
 	if got := maccmsPlayerURL(`<html>no player here</html>`); got != "" {
 		t.Fatalf("maccms should not invent a url: %q", got)
+	}
+}
+
+func TestDuanjuMaccmsPlayerIgnoresBuiltInSampleClip(t *testing.T) {
+	// 部分站点把正片地址写成 const source，同时页面里还有播放器自带的示例片。
+	// 通用兜底正则会先撞上示例片，因此必须让 const source 优先。
+	shell := `<html><body>
+<script src="/static/player/artplayer/artplayer.js"></script>
+<video id="v"></video>
+<script>
+  var art = new Artplayer({ container: '.v', url: 'https://artplayer.org/assets/sample/test1.mp4' });
+  const source = 'https://cdn.example.cn/mov/uphls/2026-09-22/abc/def.m3u8';
+</script>
+</body></html>`
+	got := maccmsPlayerURL(shell)
+	if got != "https://cdn.example.cn/mov/uphls/2026-09-22/abc/def.m3u8" {
+		t.Fatalf("maccms should prefer the real stream over the player sample clip: %q", got)
+	}
+	// 标准播放页仍然以 player_aaaa 为准。
+	standard := `<html><script>var player_aaaa={"url":"https:\/\/real.example.cn\/index.m3u8"}</script>
+<script>const source = 'https://cdn.example.cn/other.m3u8';</script></html>`
+	if got := maccmsPlayerURL(standard); got != "https://real.example.cn/index.m3u8" {
+		t.Fatalf("maccms should keep player_aaaa as the primary source: %q", got)
 	}
 }
 
@@ -285,9 +332,8 @@ func TestDuanjuMaccmsAcceptsHashedClassNamesAndWidenedEpisodes(t *testing.T) {
 
 func TestDuanjuMaccmsDetailCandidatesMatchLiveSites(t *testing.T) {
 	cases := map[string]string{
-		sourceWuguo:   "https://www.example.cn/index.php/vod/detail/id/45856.html",
-		sourceWangguo: "https://www.example.cn/vod/48478.html",
-		sourceHuaguo:  "https://www.example.cn/zywview/20523.html",
+		sourceWuguo:  "https://www.example.cn/index.php/vod/detail/id/45856.html",
+		sourceHuaguo: "https://www.example.cn/zywview/20523.html",
 	}
 	for source, want := range cases {
 		got := maccmsDetailCandidates(source, "https://www.example.cn", firstNumericTail(want))
@@ -338,27 +384,33 @@ func TestDuanjuHeguoParsesNextDataWrappedResponses(t *testing.T) {
 	}
 }
 
-func TestDuanjuSearchSupportMatchesReferenceScripts(t *testing.T) {
-	supported := []string{sourceYaguo, sourceMaoguo, sourceFanguo, sourceGuanguo, sourceHeguo, sourceXingguo, sourceHuaguo, sourceNiuguo, sourceWangguo, sourceFaguo, sourcePiguo, sourceWuguo}
+func TestDuanjuSearchAndPagingSupportMatchesCatalog(t *testing.T) {
+	supported := []string{sourceYaguo, sourceMaoguo, sourceFanguo, sourceGuanguo, sourceHeguo, sourceXingguo, sourceHuaguo, sourceNiuguo, sourceWuguo}
 	for _, source := range supported {
 		if !duanjuSupportsSearch(source) {
 			t.Fatalf("%s should support online search", source)
 		}
 	}
-	if duanjuSupportsSearch("shuangguo") || duanjuSupportsSearch("muguo") {
+	if duanjuSupportsSearch("muguo") {
 		t.Fatal("removed sources must not advertise search")
 	}
 	if duanjuSupportsSearch(sourceHongguo) {
 		t.Fatal("duanju search support leaked onto an existing source")
 	}
-	for _, source := range []string{sourceYaguo, sourceGuanguo, sourceHuaguo, sourceNiuguo, sourceWangguo, sourceFaguo, sourcePiguo, sourceWuguo} {
+	for _, source := range supported {
 		if !duanjuSupportsPaging(source) {
 			t.Fatalf("%s should support paging", source)
 		}
 	}
-	for _, source := range []string{sourceHeguo, sourceXingguo, sourceMaoguo, sourceFanguo} {
-		if duanjuSupportsPaging(source) {
-			t.Fatalf("%s reference script is single page", source)
+}
+
+func TestDuanjuBrowseAllSourcesKeepOneFeed(t *testing.T) {
+	if !duanjuBrowsesAllInOneFeed(sourceYaguo) {
+		t.Fatal("yaguo pages its whole catalog through the empty feed")
+	}
+	for _, source := range []string{sourceMaoguo, sourceFanguo, sourceHeguo, sourceXingguo} {
+		if duanjuBrowsesAllInOneFeed(source) {
+			t.Fatalf("%s only exposes part of its catalog without a category", source)
 		}
 	}
 }
@@ -381,7 +433,7 @@ func TestDuanjuMaccmsFallsBackToDetailAnchors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cards := maccmsCards(document, sourceFaguo, "https://www.example.cn")
+	cards := maccmsCards(document, sourceWuguo, "https://www.example.cn")
 	if len(cards) != 1 || cards[0].SourceID != "269321" {
 		t.Fatalf("anchor fallback cards are wrong: %+v", cards)
 	}
@@ -481,6 +533,16 @@ func TestDuanjuCleanTitleStripsLiveSeoSuffixes(t *testing.T) {
 		"不做替身后被长公主截胡赐婚 - 花生短剧":                                   "不做替身后被长公主截胡赐婚",
 		"九转星辰诀":   "九转星辰诀",
 		"我的剧-第二季": "我的剧-第二季",
+		"极品尤物绝美容颜-无套啪啪-爽到颤抖剧情介绍--撸鸡鸡": "极品尤物绝美容颜-无套啪啪-爽到颤抖",
+		"某某剧集--某站点名":                "某某剧集",
+		"带--双连字符的--":                "带--双连字符的",
+		"第一季--第二季":                  "第一季--第二季",
+		"欲望当铺 完结":                   "欲望当铺",
+		"某某剧 更新至第12集":               "某某剧",
+		"在线播放某某剧 第1集 - 高清资源 - 唯美精品": "某某剧",
+		"某某剧 第3集":                   "某某剧",
+		"命中注定我爱你 2026 中国大陆 女频 / 甜宠 / 闪婚 / 短剧": "命中注定我爱你",
+		"在线播放锤子探花美巨乳 第1集 - 高清资源":              "在线播放锤子探花美巨乳"[:0] + "锤子探花美巨乳",
 	}
 	for input, want := range cases {
 		if got := maccmsCleanTitle(input); got != want {
@@ -584,6 +646,253 @@ func TestDuanjuPlainTextStripsSearchHighlightMarkup(t *testing.T) {
 	for input, want := range cases {
 		if got := duanjuPlainText(input); got != want {
 			t.Fatalf("plain %q => %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestXingguoWalkDrivesTheWholeCatalogUpdate(t *testing.T) {
+	if got := nativeCatalogKey(sourceXingguo, xingguoWalkCategory); got != "xingguo|walk" {
+		t.Fatalf("walk cursor key changed: %q", got)
+	}
+	if !validDuanjuCategory(sourceXingguo, xingguoWalkCategory) {
+		t.Fatal("xingguo must accept the walk category")
+	}
+	if validDuanjuCategory(sourceHeguo, xingguoWalkCategory) {
+		t.Fatal("the walk category must stay specific to xingguo")
+	}
+	if xingguoWalkMaxID <= xingguoWalkBatch || xingguoWalkBatch < 1 {
+		t.Fatalf("walk bounds are inconsistent: batch=%d max=%d", xingguoWalkBatch, xingguoWalkMaxID)
+	}
+	d := &Downloader{cfg: defaultConfig(), providerHosts: map[string]string{}}
+	categories := d.providerCatalogCategories(context.Background(), sourceXingguo)
+	if len(categories) != 1 || categories[0] != xingguoWalkCategory {
+		t.Fatalf("xingguo update must walk resource ids, got %v", categories)
+	}
+}
+
+func TestNiuguoCatalogSendsTypeIDInsteadOfClass(t *testing.T) {
+	var queries []url.Values
+	d, server := duanjuFixtureDownloader(t, func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query())
+		payload := `{"status":0,"msg":"ok","data":[{"vod_id":575258,"vod_name":"牛果样本","vod_pic":"https://pic.example.cn/a.jpg","vod_remarks":"已完结","vod_douban_score":"4.5"}]}`
+		block, err := aes.NewCipher(niuguoDecryptKey(niuguoRequestURI("http://" + r.Host + r.URL.String())))
+		if err != nil {
+			t.Errorf("fixture cipher failed: %v", err)
+			return
+		}
+		padded := pkcs7Pad([]byte(payload), aes.BlockSize)
+		encrypted := make([]byte, len(padded))
+		for offset := 0; offset < len(padded); offset += aes.BlockSize {
+			block.Encrypt(encrypted[offset:offset+aes.BlockSize], padded[offset:offset+aes.BlockSize])
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		io.WriteString(w, base64.StdEncoding.EncodeToString(encrypted))
+	})
+	d.providerHosts[sourceNiuguo] = server.URL
+	for _, category := range []string{"5", "1", "2", "4", "3"} {
+		if _, _, err := d.fetchNiuguoCatalogPage(context.Background(), 1, category); err != nil {
+			t.Fatalf("niuguo catalog for %q failed: %v", category, err)
+		}
+	}
+	if len(queries) != 5 {
+		t.Fatalf("expected 5 requests, got %d", len(queries))
+	}
+	for index, query := range queries {
+		want := []string{"5", "1", "2", "4", "3"}[index]
+		if query.Get("type_id") != want {
+			t.Fatalf("request %d sent type_id=%q want %q", index, query.Get("type_id"), want)
+		}
+		if query.Get("class") != "" {
+			t.Fatalf("request %d must not send class, got %q", index, query.Get("class"))
+		}
+	}
+}
+
+func TestNiuguoCategoryAndBoardIDsMatchTypeIDs(t *testing.T) {
+	want := map[string]string{"5": "短剧", "1": "电影", "2": "电视剧", "4": "动漫", "3": "综艺"}
+	static := duanjuStaticCategories[sourceNiuguo]
+	if len(static) != len(want) {
+		t.Fatalf("niuguo should expose %d categories, got %d", len(want), len(static))
+	}
+	for _, entry := range static {
+		if want[entry.ID] != entry.Name {
+			t.Fatalf("niuguo category %q is named %q", entry.ID, entry.Name)
+		}
+		delete(want, entry.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("niuguo categories are missing: %v", want)
+	}
+	typeIDs := map[string]string{"5": "短剧", "1": "电影", "2": "电视剧", "4": "动漫", "3": "综艺"}
+	seen := map[string]bool{}
+	for _, board := range rankingBoards {
+		if board.Source != sourceNiuguo {
+			continue
+		}
+		if seen[board.path] {
+			t.Fatalf("niuguo board %s reuses category %q", board.ID, board.path)
+		}
+		seen[board.path] = true
+		if _, found := typeIDs[board.path]; !found {
+			t.Fatalf("niuguo board %s uses %q which is not a type_id", board.ID, board.path)
+		}
+	}
+	if len(seen) != 5 {
+		t.Fatalf("niuguo should expose 5 distinct boards, got %d", len(seen))
+	}
+}
+
+func TestDuanjuMaccmsSourceIDHandlesLineAndPartPaths(t *testing.T) {
+	cases := map[string]string{
+		"https://youavhub.com/index.php/vod/play/id/230548/sid/1/nid/1/": "230548",
+		"https://youavhub.com/index.php/vod/play/id/230548/sid/2/nid/1/": "230548",
+		"https://www.llsp.me/vodplay/997313-1-1.html":                    "997313",
+		"https://xqxq1.cc/index.php/vod/play/id/546309.html":             "546309",
+		"https://shiresm.lol/index.php/vod/detail/id/107039.html":        "107039",
+		"https://www.duanju2.com/vod/48557.html":                         "48557",
+	}
+	for input, want := range cases {
+		if got := maccmsSourceIDFromURL(input); got != want {
+			t.Fatalf("id from %q => %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestDuanjuMaccmsCardsMatchVodlistItems(t *testing.T) {
+	document, err := html.Parse(strings.NewReader(`<html><body>
+	<ul class="vodlist vodlist_wi clearfix">
+		<li class="vodlist_item num_1">
+			<a class="vodlist_thumb lazyload" href="/index.php/vod/play/id/230548/sid/1/nid/1/" title="[换脸]宋雨琦 粗暴性爱.." data-original="https://img.example.cn/cover/1.jpg"></a>
+			<div class="vodlist_titbox">
+				<p class="vodlist_title"><a href="/index.php/vod/play/id/230548/sid/1/nid/1/" title="[换脸]宋雨琦 粗暴性爱..">[换脸]宋雨琦 粗暴性爱..</a></p>
+				<span class="pic_text text_right">第1集</span>
+			</div>
+		</li>
+		<li class="vodlist_item num_2">
+			<a class="vodlist_thumb lazyload" href="/index.php/vod/play/id/230549/sid/1/nid/1/" title="第二个片子" data-original="https://img.example.cn/cover/2.jpg"></a>
+		</li>
+	</ul>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := maccmsCards(document, sourceYouguo, "https://youavhub.com")
+	if len(items) != 2 {
+		t.Fatalf("vodlist_item cards should be parsed, got %d", len(items))
+	}
+	if items[0].SourceID != "230548" || items[0].Title != "[换脸]宋雨琦 粗暴性爱.." {
+		t.Fatalf("first card is wrong: %+v", items[0])
+	}
+	if items[1].SourceID != "230549" || items[1].Title != "第二个片子" {
+		t.Fatalf("second card is wrong: %+v", items[1])
+	}
+	if items[0].Cover == "" {
+		t.Fatal("card cover should be resolved from data-original")
+	}
+}
+
+func TestDuanjuMaccmsDetailTitleSkipsSectionHeadings(t *testing.T) {
+	document, err := html.Parse(strings.NewReader(`<html><body>
+	<h1>猜你喜欢</h1>
+	<h2>换脸热巴被老头内射.</h2>
+	<title>换脸热巴被老头内射._明星换脸_线路3 - 榴莲视频</title>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := maccmsDetailTitle(document); got != "换脸热巴被老头内射." {
+		t.Fatalf("detail title should skip section headings, got %q", got)
+	}
+	// 正文标题全是栏目名时必须回落到 <title>，不能把栏目名当成剧名。
+	only := []string{"猜你喜欢", "相关推荐", "播放列表", "热门推荐", "为你推荐"}
+	for _, heading := range only {
+		if !maccmsIsSectionHeading(heading) {
+			t.Fatalf("%q should be treated as a section heading", heading)
+		}
+	}
+	if maccmsIsSectionHeading("换脸热巴被老头内射.") {
+		t.Fatal("a real title must not be treated as a section heading")
+	}
+}
+
+func TestDuanjuMaccmsCardTitleDropsHighlightTags(t *testing.T) {
+	// 搜索页把关键词高亮写进 alt 属性，剧名里不能留下标签。
+	document, err := html.Parse(strings.NewReader(`<html><body>
+	<ul class="module-list">
+		<div class="module-item">
+			<a class="module-item-pic" href="/voddetail/238123.html">
+				<img class="lazy" alt="仁心<em>俱</em>乐部" data-original="https://img.example.cn/a.jpg">
+			</a>
+			<div class="module-card-item-title"><a href="/voddetail/238123.html"><strong>仁心<em>俱</em>乐部</strong></a></div>
+		</div>
+	</ul>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := maccmsCards(document, sourceMiguo, "https://dmxq40.com")
+	if len(items) != 1 {
+		t.Fatalf("expected one card, got %d", len(items))
+	}
+	if items[0].Title != "仁心俱乐部" {
+		t.Fatalf("highlight tags must be removed from titles, got %q", items[0].Title)
+	}
+	if strings.ContainsAny(items[0].Title, "<>") {
+		t.Fatalf("title still carries markup: %q", items[0].Title)
+	}
+	// 属性清理本身也要能处理实体与多余空白。
+	if got := maccmsCleanAttribute(" A &amp; B <em>c</em>  d "); got != "A & B c d" {
+		t.Fatalf("attribute cleanup is wrong: %q", got)
+	}
+}
+
+func TestDuanjuMaccmsEpisodesDropOtherDramas(t *testing.T) {
+	// 详情页的「猜你喜欢」也用播放/详情链接出现，不能混进分集列表。
+	document, err := html.Parse(strings.NewReader(`<html><body>
+	<div class="playlist">
+		<a href="/vod/play/id/302677/sid/1/nid/1/">在线播放</a>
+		<a href="/vod/detail/id/302677/">4.0分 HD</a>
+		<a href="/vod/detail/id/302676/">2.0分 HD</a>
+		<a href="/vod/detail/id/302675/">6.0分 HD</a>
+	</div>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	episodes := maccmsEpisodesFromDocument(document)
+	if len(episodes) != 4 {
+		t.Fatalf("fixture should expose four anchors, got %d", len(episodes))
+	}
+	playable := maccmsEpisodesOfSource(episodes, "302677", true)
+	if len(playable) != 1 {
+		t.Fatalf("only the play link of this drama may survive, got %d", len(playable))
+	}
+	if !strings.Contains(playable[0].URL, "/vod/play/id/302677/") {
+		t.Fatalf("kept the wrong episode: %q", playable[0].URL)
+	}
+	// 分集链接不含剧号的站源（例如 /zywplay/1-0-0.html）取不到剧号，
+	// 两轮筛选都会落空，调用方据此保留原列表，不会被误伤。
+	foreign := []providerEpisode{{URL: "/zywplay/1-0-0.html"}, {URL: "/zywplay/1-0-1.html"}}
+	if id := maccmsSourceIDFromURL(foreign[0].URL); id != "" {
+		t.Fatalf("idless episode links must not yield an id, got %q", id)
+	}
+	if kept := maccmsEpisodesOfSource(foreign, "1", true); len(kept) != 0 {
+		t.Fatalf("strict pass must keep nothing here, got %d", len(kept))
+	}
+	if kept := maccmsEpisodesOfSource(foreign, "1", false); len(kept) != 0 {
+		t.Fatalf("loose pass must keep nothing here, got %d", len(kept))
+	}
+}
+
+func TestDuanjuCleanTitleDropsQualityTail(t *testing.T) {
+	for raw, want := range map[string]string{
+		"内射伺候 HD":    "内射伺候",
+		"某某短剧 1080P": "某某短剧",
+		"某某短剧 蓝光":    "某某短剧",
+		"HDMI接口维修":   "HDMI接口维修",
+	} {
+		if got := maccmsCleanTitle(raw); got != want {
+			t.Fatalf("clean title %q => %q, want %q", raw, got, want)
 		}
 	}
 }

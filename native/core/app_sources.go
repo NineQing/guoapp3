@@ -33,6 +33,8 @@ type nativeSourceRecord struct {
 	MetadataCursor  string               `json:"metadataCursor,omitempty"`
 }
 
+const nativeSourceErrorRunes = 600
+
 type nativeSourceStatus struct {
 	UnknownVIP   int                 `json:"unknownVip"`
 	Source       string              `json:"source"`
@@ -200,7 +202,7 @@ func (engine *nativeEngine) startSourceTask(source, operation string, drama nati
 		engine.mu.Unlock()
 		return nativeSourceStatus{}, fmt.Errorf("站源暂时暂停请求，请在 %d 秒后重试", max(1, int(time.Until(previous.RetryAt).Seconds()+.999)))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	task := &nativeSourceTask{cancel: cancel}
 	engine.sourceTasks[source] = task
 	previous.Operation, previous.Running, previous.Stage = operation, true, "准备中"
@@ -242,7 +244,7 @@ func (engine *nativeEngine) runSourceTask(ctx context.Context, source, operation
 		record.Running, record.FinishedAt = false, time.Now()
 		record.Stage = "已完成"
 		if err != nil {
-			record.Stage, record.Error = "未完成", publicError(err).Error()
+			record.Stage, record.Error = "未完成", truncate(publicError(err).Error(), nativeSourceErrorRunes)
 			var persistence *nativePersistenceError
 			if errors.As(err, &persistence) {
 				record.NeedsSave, record.Error = engine.catalogSaveError != nil, ""
@@ -282,7 +284,7 @@ func (engine *nativeEngine) updateSource(ctx context.Context, source, operation 
 	}()
 	if operation == "update" {
 		engine.changeSourceRecord(source, func(record *nativeSourceRecord) { record.Stage = "查找新剧" })
-		if err := engine.loadSourceCatalogPage(ctx, source, 1); err != nil {
+		if err := engine.loadSourceCatalogCategories(ctx, source, 1, true); err != nil {
 			return err
 		}
 	}
@@ -296,7 +298,7 @@ func (engine *nativeEngine) updateSource(ctx context.Context, source, operation 
 			}
 			limit = max(0, maxPages-1)
 		}
-		if err := engine.loadMoreSourceCatalogPages(ctx, source, limit); err != nil {
+		if err := engine.loadSourceCatalogCategories(ctx, source, limit, false); err != nil {
 			return err
 		}
 	}
@@ -410,7 +412,11 @@ func (engine *nativeEngine) updateSource(ctx context.Context, source, operation 
 }
 
 func (engine *nativeEngine) loadSourceCatalogPage(ctx context.Context, source string, page int) error {
-	result, err := engine.nativeCatalog(ctx, nativeInput{Source: source, Page: page, Force: true})
+	return engine.loadSourceCatalogCategoryPage(ctx, source, "", page)
+}
+
+func (engine *nativeEngine) loadSourceCatalogCategoryPage(ctx context.Context, source, category string, page int) error {
+	result, err := engine.nativeCatalog(ctx, nativeInput{Source: source, Category: category, Page: page, Force: true})
 	if err != nil {
 		return err
 	}
@@ -423,23 +429,67 @@ func (engine *nativeEngine) loadSourceCatalogPage(ctx context.Context, source st
 	return nil
 }
 
-func (engine *nativeEngine) loadMoreSourceCatalogPages(ctx context.Context, source string, limit int) error {
-	if limit <= 0 {
+func (engine *nativeEngine) sourceCatalogCategories(ctx context.Context, source string) []string {
+	source = canonicalProviderSource(source)
+	if !isDuanjuProviderSource(source) {
+		return []string{""}
+	}
+	return engine.downloader.providerCatalogCategories(ctx, source)
+}
+
+func (engine *nativeEngine) loadSourceCatalogCategory(ctx context.Context, source, category string, pages int, rescanHead bool) error {
+	if pages <= 0 && !rescanHead {
 		return nil
 	}
-	for loaded := 0; loaded < limit; loaded++ {
-		current := engine.nativeCached(source)
-		if !current.HasMore {
-			return nil
+	key := nativeCatalogKey(source, category)
+	engine.mu.Lock()
+	state, found := engine.catalogStates[key]
+	engine.mu.Unlock()
+	tail := 1
+	if found && state.HasMore {
+		tail = max(1, state.Page+1)
+	}
+	if rescanHead {
+		if err := engine.loadSourceCatalogCategoryPage(ctx, source, category, 1); err != nil {
+			return err
 		}
-		page := current.Page + 1
-		if len(current.Items) == 0 {
-			page = 1
-		}
+	}
+	for loaded := 0; loaded < pages; loaded++ {
+		page := tail + loaded
 		if page > 1000000 {
 			return errors.New("站源分页已达到接口范围，已保留目录位置")
 		}
-		if err := engine.loadSourceCatalogPage(ctx, source, page); err != nil {
+		if err := engine.loadSourceCatalogCategoryPage(ctx, source, category, page); err != nil {
+			return err
+		}
+		engine.mu.Lock()
+		current, tracked := engine.catalogStates[key]
+		engine.mu.Unlock()
+		if !tracked || !current.HasMore {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (engine *nativeEngine) loadSourceCatalogCategories(ctx context.Context, source string, pages int, rescanHead bool) error {
+	categories := engine.sourceCatalogCategories(ctx, source)
+	if len(categories) > 1 {
+		engine.mu.Lock()
+		engine.deferCatalogSave = true
+		engine.mu.Unlock()
+		defer func() {
+			engine.mu.Lock()
+			engine.deferCatalogSave = false
+			engine.writeCatalogDiskLocked()
+			engine.mu.Unlock()
+		}()
+	}
+	for _, category := range categories {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := engine.loadSourceCatalogCategory(ctx, source, category, pages, rescanHead); err != nil {
 			return err
 		}
 	}

@@ -86,7 +86,12 @@ func (cache *nativeCoverCache) repair(ctx context.Context, drama nativeDrama, fo
 	return address, err
 }
 
-func (engine *nativeEngine) loadCover(ctx context.Context, drama nativeDrama, force bool) (map[string]any, error) {
+func (engine *nativeEngine) loadCover(ctx context.Context, drama nativeDrama, force, refresh bool) (map[string]any, error) {
+	if refresh {
+		if _, err := engine.covers.repair(ctx, drama, true); err != nil {
+			return nil, err
+		}
+	}
 	engine.mu.Lock()
 	for _, cached := range engine.catalogs[drama.Source] {
 		if cached.ID == drama.ID && drama.Cover == "" && cached.Cover != "" {
@@ -108,6 +113,9 @@ func (engine *nativeEngine) loadCover(ctx context.Context, drama nativeDrama, fo
 	if address != "" && address != drama.Cover {
 		engine.saveCoverAddress(drama.ID, address)
 	}
+	if address == "" {
+		address = drama.Cover
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -118,7 +126,7 @@ func (engine *nativeEngine) loadCover(ctx context.Context, drama nativeDrama, fo
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	return map[string]any{"path": path, "heic": isHEICImage(header[:count])}, nil
+	return map[string]any{"path": path, "heic": isHEICImage(header[:count]), "cover": address}, nil
 }
 
 func (engine *nativeEngine) saveCoverAddress(id, address string) {
@@ -139,7 +147,7 @@ func (engine *nativeEngine) saveCoverAddress(id, address string) {
 }
 
 func (engine *nativeEngine) prepareCover(ctx context.Context, drama nativeDrama) (any, error) {
-	result, err := engine.loadCover(ctx, drama, false)
+	result, err := engine.loadCover(ctx, drama, false, false)
 	if err != nil {
 		return nil, err
 	}

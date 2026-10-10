@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
 import 'models.dart';
 import 'download_preferences.dart';
 import 'episode_browser.dart';
+import 'glass_panel.dart';
 import 'remote_widgets.dart';
 
 class DownloadSelection {
@@ -50,17 +52,13 @@ class _DownloadPickerState extends State<DownloadPicker> {
       _selected.addAll(choices.take(500).map((episode) => episode.number));
     });
     if (choices.length > 500) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已选前 500 集；可清空后按分组选择其他集数，或从发现页使用整剧批量下载')),
-      );
+      AppNotice.show(context, '已选前 500 集；可清空后按分组选择其他集数，或从发现页使用整剧批量下载');
     }
   }
 
   void _toggle(Episode episode) {
     if (!_selected.contains(episode.number) && _selected.length >= 500) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('一次最多加入 500 集，请分批下载')));
+      AppNotice.show(context, '一次最多加入 500 集，请分批下载');
       return;
     }
     setState(() {
@@ -86,9 +84,7 @@ class _DownloadPickerState extends State<DownloadPicker> {
       if (mounted) setState(() => _selected.clear());
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        AppNotice.show(context, error.toString());
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -168,24 +164,19 @@ class _DownloadPickerState extends State<DownloadPicker> {
                       child: const Text('仅非 VIP'),
                     ),
                     const SizedBox(width: 4),
-                    const Text('画质'),
-                    DropdownButton<int>(
+                    GlassChoiceField<int>(
                       key: const ValueKey('download-quality'),
                       value: _quality,
-                      onChanged: _submitting
-                          ? null
-                          : (value) => setState(() => _quality = value ?? 0),
-                      items: [
-                        const DropdownMenuItem(
-                          value: 0,
-                          child: Text('自动 · 高清'),
-                        ),
-                        for (final quality in [1080, 720, 480])
-                          DropdownMenuItem(
-                            value: quality,
-                            child: Text('${quality}P'),
-                          ),
+                      label: '画质',
+                      compact: true,
+                      enabled: !_submitting,
+                      entries: const [
+                        (0, '自动 · 高清'),
+                        (1080, '1080P'),
+                        (720, '720P'),
+                        (480, '480P'),
                       ],
+                      onChanged: (value) => setState(() => _quality = value),
                     ),
                   ],
                 ),

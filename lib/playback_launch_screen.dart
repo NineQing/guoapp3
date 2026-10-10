@@ -1,7 +1,10 @@
+import 'player_route.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
 import 'core_bridge.dart';
 import 'follow_state.dart';
 import 'local_store.dart';
@@ -14,6 +17,7 @@ Future<void> openPlaybackDirectly(
   required Drama drama,
   required AppRepository repository,
   required LocalStore store,
+  String searchKeyword = '',
 }) async {
   final profileEpoch = store.profileEpoch;
   try {
@@ -62,13 +66,14 @@ Future<void> openPlaybackDirectly(
         : 0.0;
     if (!context.mounted || profileEpoch != store.profileEpoch) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PlayerScreen(
+      playerRoute(
+        PlayerScreen(
           detail: merged,
           initialIndex: index,
           initialPosition: position,
           repository: repository,
           store: store,
+          searchKeyword: searchKeyword,
         ),
       ),
     );
@@ -79,9 +84,7 @@ Future<void> openPlaybackDirectly(
       retryCover: true,
     );
     final message = error is AppFailure ? error.message : '暂时无法播放，请重试';
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    AppNotice.show(context, message);
   }
 }
 
@@ -91,11 +94,13 @@ class PlaybackLaunchScreen extends StatefulWidget {
     required this.drama,
     required this.repository,
     required this.store,
+    this.searchKeyword = '',
   });
 
   final Drama drama;
   final AppRepository repository;
   final LocalStore store;
+  final String searchKeyword;
 
   @override
   State<PlaybackLaunchScreen> createState() => _PlaybackLaunchScreenState();
@@ -188,13 +193,14 @@ class _PlaybackLaunchScreenState extends State<PlaybackLaunchScreen> {
         return;
       }
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => PlayerScreen(
+        playerRoute(
+          PlayerScreen(
             detail: merged,
             initialIndex: index,
             initialPosition: position,
             repository: widget.repository,
             store: widget.store,
+            searchKeyword: widget.searchKeyword,
           ),
         ),
       );

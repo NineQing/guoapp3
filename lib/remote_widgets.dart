@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import 'search_input.dart';
 import 'app_layout.dart';
+
 import 'package:flutter/services.dart';
 
+/// 遥控区域之间的方向越界出口：没有接管者时保持默认焦点遍历行为。
 KeyEventResult _remoteExit(VoidCallback? action, {bool handled = false}) {
   if (action == null) {
     return handled ? KeyEventResult.handled : KeyEventResult.ignored;
@@ -12,6 +15,7 @@ KeyEventResult _remoteExit(VoidCallback? action, {bool handled = false}) {
   return KeyEventResult.handled;
 }
 
+/// 电视模式下为页面补齐初始焦点，避免进入页面后遥控器没有响应。
 void ensureTelevisionFocus(BuildContext context) {
   WidgetsBinding.instance.addPostFrameCallback((_) {
     if (!context.mounted) return;
@@ -320,15 +324,14 @@ class RemoteGridState extends State<RemoteGrid> {
   @override
   void didUpdateWidget(covariant RemoteGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final removed = _nodes.keys
-        .where((key) => !widget.itemKeys.contains(key))
-        .toList();
+    final keys = widget.itemKeys.toSet();
+    final removed = _nodes.keys.where((key) => !keys.contains(key)).toList();
     final restore = removed.any((key) => _nodes[key]!.hasFocus);
     final index = oldWidget.itemKeys.indexOf(_focused ?? '');
     for (final key in removed) {
       _nodes.remove(key)?.dispose();
     }
-    if (_focused != null && !widget.itemKeys.contains(_focused)) {
+    if (_focused != null && !keys.contains(_focused)) {
       _focused = null;
       _target = null;
       _generation++;
@@ -359,6 +362,7 @@ class RemoteGridState extends State<RemoteGrid> {
     onKeyEvent: _key,
     child: CustomScrollView(
       controller: _scroll,
+      scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
       slivers: [
         SliverPadding(
           padding: widget.padding,
@@ -384,6 +388,7 @@ class RemoteGridState extends State<RemoteGrid> {
   );
 }
 
+/// 单行横向遥控区域，用于分类栏、榜单栏目和工具行。
 class RemoteRow extends StatefulWidget {
   const RemoteRow({
     super.key,
@@ -502,17 +507,16 @@ class RemoteRowState extends State<RemoteRow> {
   @override
   void didUpdateWidget(covariant RemoteRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final removed = _nodes.keys
-        .where((key) => !widget.itemKeys.contains(key))
-        .toList();
+    final keys = widget.itemKeys.toSet();
+    final removed = _nodes.keys.where((key) => !keys.contains(key)).toList();
     for (final key in removed) {
       _nodes.remove(key)?.dispose();
     }
-    if (_focused != null && !widget.itemKeys.contains(_focused)) {
+    if (_focused != null && !keys.contains(_focused)) {
       _focused = null;
       _target = null;
     }
-    if (_target != null && !widget.itemKeys.contains(_target)) _target = null;
+    if (_target != null && !keys.contains(_target)) _target = null;
   }
 
   @override
@@ -553,6 +557,7 @@ class RemoteRowState extends State<RemoteRow> {
   );
 }
 
+/// 等高纵向遥控列表，用于榜单、下载、设置等条目式页面。
 class RemoteList extends StatefulWidget {
   const RemoteList({
     super.key,
@@ -685,20 +690,19 @@ class RemoteListState extends State<RemoteList> {
   @override
   void didUpdateWidget(covariant RemoteList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final removed = _nodes.keys
-        .where((key) => !widget.itemKeys.contains(key))
-        .toList();
+    final keys = widget.itemKeys.toSet();
+    final removed = _nodes.keys.where((key) => !keys.contains(key)).toList();
     final restore = removed.any((key) => _nodes[key]!.hasFocus);
     final index = oldWidget.itemKeys.indexOf(_focused ?? '');
     for (final key in removed) {
       _nodes.remove(key)?.dispose();
     }
-    if (_focused != null && !widget.itemKeys.contains(_focused)) {
+    if (_focused != null && !keys.contains(_focused)) {
       _focused = null;
       _target = null;
       _generation++;
     }
-    if (_target != null && !widget.itemKeys.contains(_target)) _target = null;
+    if (_target != null && !keys.contains(_target)) _target = null;
     if (restore && widget.itemKeys.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && widget.itemKeys.isNotEmpty) {
@@ -750,6 +754,7 @@ class RemoteListState extends State<RemoteList> {
   );
 }
 
+/// 电视模式下的统一条目外观：整行是一个焦点单位，状态写在副标题文本里。
 class RemoteListTile extends StatelessWidget {
   const RemoteListTile({
     super.key,
@@ -892,6 +897,7 @@ class RemoteEpisodeButton extends StatelessWidget {
   );
 }
 
+/// 电视模式下的选项列表对话框，全部选项都可用遥控器移动和确认。
 class TelevisionActionDialog extends StatelessWidget {
   const TelevisionActionDialog({
     super.key,

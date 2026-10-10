@@ -66,6 +66,7 @@ class CatalogBrowser {
 
   void updateDramas(Iterable<Drama> dramas) {
     final updates = {for (final drama in dramas) drama.id: drama};
+    if (updates.isEmpty) return;
     for (final drama in updates.values) {
       final library = _library[drama.source];
       if (library?.containsKey(drama.id) == true) {
@@ -74,10 +75,15 @@ class CatalogBrowser {
     }
     for (final session in _sessions.values) {
       for (final entry in session.entries.values) {
-        entry.items = [
-          for (final item in entry.items)
-            updates[item.id] == null ? item : item.merge(updates[item.id]!),
-        ];
+        List<Drama>? updatedItems;
+        for (var index = 0; index < entry.items.length; index++) {
+          final item = entry.items[index];
+          final fresh = updates[item.id];
+          if (fresh == null) continue;
+          updatedItems ??= List<Drama>.of(entry.items);
+          updatedItems[index] = item.merge(fresh);
+        }
+        if (updatedItems != null) entry.items = updatedItems;
       }
     }
   }
@@ -163,6 +169,7 @@ class CatalogBrowser {
     bool useCache = false,
     bool cacheOnly = false,
     void Function(CatalogPage)? onCached,
+    void Function(CatalogPage)? onPartial,
   }) async {
     if (cacheOnly && (more || force || query.trim().isNotEmpty)) {
       throw AppFailure('缓存读取不能同时请求搜索或续页');
@@ -221,6 +228,23 @@ class CatalogBrowser {
       );
     }
 
+    var emitted = 0;
+    var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+    void emitPartial() {
+      final listener = onPartial;
+      if (listener == null || cacheOnly || more) return;
+      if (generation != session.generation) return;
+      final page = snapshot();
+      if (page.items.length == emitted) return;
+      final now = DateTime.now();
+      if (now.difference(lastEmit) < const Duration(milliseconds: 120)) {
+        return;
+      }
+      lastEmit = now;
+      emitted = page.items.length;
+      listener(page);
+    }
+
     if ((useCache || cacheOnly) && !force && !more && query.isEmpty) {
       await _each(sourceOrder, (source) async {
         try {
@@ -270,7 +294,11 @@ class CatalogBrowser {
         };
         entry.items = items.values.toList();
         entry.page = result.page;
-        entry.nextPage = result.warning.isEmpty ? result.page + 1 : page;
+        // hasMore 为真说明后面还有内容，必须推进页码；否则带警示时会反复
+        // 请求同一页，分页搜索的「加载更多」就会一直原地打转。
+        entry.nextPage = result.hasMore || result.warning.isEmpty
+            ? result.page + 1
+            : page;
         entry.hasMore =
             (query.isEmpty || SourceSite.byId(source).pagedSearch) &&
             (result.hasMore || result.warning.isNotEmpty);
@@ -288,6 +316,7 @@ class CatalogBrowser {
         entry.fresh = false;
         failures[source] = error.toString();
       }
+      emitPartial();
     });
     final result = snapshot();
     if (result.items.isEmpty && failures.isNotEmpty) {

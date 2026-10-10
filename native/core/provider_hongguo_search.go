@@ -59,6 +59,46 @@ func (downloader *Downloader) searchHongguoDramas(ctx context.Context, keyword s
 	return downloader.searchHongguoDramasProgress(ctx, keyword, nil)
 }
 
+// searchHongguoDramasPaged 把搜索拆成分页：第 1 页给出名称与综合搜索的首批结果，
+// 第 2 页起每次只跑一轮季数补齐，交给用户手动「加载更多」。
+func (downloader *Downloader) searchHongguoDramasPaged(ctx context.Context, keyword string, page int) (hongguoSearchEntry, bool, error) {
+	entry, err := downloader.searchHongguoDramas(ctx, keyword)
+	if err != nil {
+		return hongguoSearchEntry{}, false, err
+	}
+	if page <= 1 {
+		return entry, entry.Limited || downloader.hongguoSearchContinuationPending(keyword), nil
+	}
+	limited := downloader.runHongguoSearchSeasons(ctx, keyword, &entry, hongguoSearchContinuationQueries)
+	if len(entry.Dramas) > 0 {
+		downloader.rememberHongguoSearch(keyword, entry)
+	}
+	return entry, limited, nil
+}
+
+func (downloader *Downloader) rememberHongguoSearch(keyword string, entry hongguoSearchEntry) {
+	client := downloader.hongguoClient()
+	client.mu.Lock()
+	entry.ExpiresAt = time.Now().Add(5 * time.Minute)
+	client.searches[keyword] = entry
+	client.mu.Unlock()
+}
+
+func (downloader *Downloader) peekHongguoSearch(keyword string) (hongguoSearchEntry, bool) {
+	keyword, err := hongguoSearchKeyword(keyword)
+	if err != nil {
+		return hongguoSearchEntry{}, false
+	}
+	client := downloader.hongguoClient()
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	pending := client.searchPending[keyword]
+	if pending == nil {
+		return hongguoSearchEntry{}, false
+	}
+	return cloneHongguoSearchEntry(pending.snapshot), len(pending.snapshot.Dramas) > 0
+}
+
 func (downloader *Downloader) searchHongguoDramasProgress(ctx context.Context, keyword string, progress func(hongguoSearchEntry)) (hongguoSearchEntry, error) {
 	keyword, err := hongguoSearchKeyword(keyword)
 	if err != nil {
@@ -194,12 +234,7 @@ func (downloader *Downloader) fetchHongguoSearch(ctx context.Context, keyword st
 	} else if namesErr != nil {
 		entry.Warning = "红果名称检索暂不可用，结果可能缺少部分剧集，可重试"
 	}
-	if seasonsLimited {
-		if entry.Warning != "" {
-			entry.Warning += "；"
-		}
-		entry.Warning += "部分季数暂未补齐，已保留当前结果，可重试"
-	}
+	_ = seasonsLimited
 	entry.Limited = entry.Limited || pageErr != nil || namesErr != nil || seasonsLimited
 	if entry.Total < len(entry.Dramas) {
 		entry.Total = len(entry.Dramas)
@@ -226,6 +261,23 @@ func mergeHongguoSearchDramas(dramas, batch []Drama) []Drama {
 	return dramas
 }
 
+// hongguoSearchProbe 同时走建议接口与搜索页。建议接口只回 short_play_name，
+// 拿「剧名第N季」去问常常整条落空；搜索页对精确剧名会把该季排在第一行，
+// 因此季数补齐必须两路都问，否则二十季的剧只能捞到零星几季。
+func (downloader *Downloader) hongguoSearchProbe(ctx context.Context, keyword string) []Drama {
+	var dramas []Drama
+	if names, err := downloader.fetchHongguoSearchNames(ctx, keyword); err == nil {
+		dramas = append(dramas, names...)
+	}
+	if ctx.Err() != nil {
+		return dramas
+	}
+	if page, err := downloader.fetchHongguoSearchPage(ctx, keyword); err == nil {
+		dramas = append(dramas, page.Dramas...)
+	}
+	return dramas
+}
+
 func (downloader *Downloader) fetchHongguoSearchNames(ctx context.Context, keyword string) ([]Drama, error) {
 	records, err := downloader.fetchHongguoSuggestionRecords(ctx, keyword, hongguoSearchNameCount)
 	if err != nil {
@@ -233,11 +285,18 @@ func (downloader *Downloader) fetchHongguoSearchNames(ctx context.Context, keywo
 	}
 	dramas := make([]Drama, 0, len(records))
 	for _, record := range records {
-
-		if record.WordType != "short_play_name" || !hongguoNumericID.MatchString(mapString(record.VideoData, "series_id_str", "series_id")) {
+		if record.WordType != "short_play_name" {
 			continue
 		}
-		drama := hongguoDramaFromAny(map[string]any{"video_data": record.VideoData, "name": record.Name, "keyword": record.Keyword}, "短剧")
+		video := record.VideoData
+		if !hongguoNumericID.MatchString(mapString(video, "series_id_str", "series_id")) {
+			id := mapString(map[string]any{"keyword": record.Keyword}, "keyword")
+			if !hongguoNumericID.MatchString(id) {
+				continue
+			}
+			video = map[string]any{"series_id": id}
+		}
+		drama := hongguoDramaFromAny(map[string]any{"video_data": video, "name": record.Name, "keyword": record.Keyword}, "短剧")
 		if drama.ID != "" && drama.DisplayTitle() != drama.SourceID {
 			dramas = append(dramas, drama)
 		}

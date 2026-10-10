@@ -197,6 +197,11 @@ func (d *Downloader) fetchHuangguoAICatalogPage(ctx context.Context, page int, c
 		group.Add(1)
 		go func(index int, entry nativeCategory) {
 			defer group.Done()
+			defer func() {
+				if recover() != nil {
+					results[index].err = errors.New("黄果分类处理失败")
+				}
+			}()
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
@@ -204,8 +209,9 @@ func (d *Downloader) fetchHuangguoAICatalogPage(ctx context.Context, page int, c
 				results[index].err = ctx.Err()
 				return
 			}
-			address := fmt.Sprintf("%s/api/videos/category/%s?sort=hot&page=%d&size=24", d.providerBaseURL(sourceHuangguoAI), url.PathEscape(entry.ID), page)
-			body, err := d.fetchProviderText(ctx, address, d.providerBaseURL(sourceHuangguoAI)+"/"+entry.ID+"/")
+			base := d.huangguoAIContentBaseURL(ctx)
+			address := fmt.Sprintf("%s/api/videos/category/%s?sort=hot&page=%d&size=24", base, url.PathEscape(entry.ID), page)
+			body, err := d.fetchProviderText(ctx, address, base+"/"+entry.ID+"/")
 			if err == nil {
 				results[index].items = parseHuangguoAIJSONCards([]byte(body), address, entry.Name)
 			}

@@ -93,7 +93,7 @@ func TestHuangdouRankingPreservesOrderAndMetrics(t *testing.T) {
 
 func TestHuangguoRankingStructuredData(t *testing.T) {
 	board, _ := findRankingBoard("huangguo-potential")
-	body := `<script type="application/ld+json">{"@graph":[{"@type":"BreadcrumbList","itemListElement":[]},{"@type":"ItemList","@id":"https://huangguoai.com/ranks/potential/#itemlist","itemListElement":[{"position":1,"name":"A & B","url":"https://huangguoai.com/detail/12/"},{"position":3,"name":"第二条","url":"https://huangguoai.com/detail/34/"}]}]}</script>`
+	body := `<script type="application/ld+json">{"@graph":[{"@type":"BreadcrumbList","itemListElement":[]},{"@type":"ItemList","@id":"https://huangguoai.ai/ranks/potential/#itemlist","itemListElement":[{"position":1,"name":"A & B","url":"https://huangguoai.ai/video/12/"},{"position":3,"name":"第二条","url":"https://huangguoai.ai/video/34/"}]}]}</script>`
 	result, err := parseHuangguoRanking(body, board)
 	if err != nil || len(result.Items) != 2 || result.Items[1].Rank != 3 || result.Items[0].Drama.ID != "huangguoai:12" || result.HasMore {
 		t.Fatalf("could not preserve structured site ranks: %+v %v", result, err)
@@ -102,7 +102,7 @@ func TestHuangguoRankingStructuredData(t *testing.T) {
 	if _, err := parseHuangguoRanking(body, other); err == nil {
 		t.Fatal("accepted a different chart's structured data")
 	}
-	if _, err := parseHuangguoRanking(strings.ReplaceAll(body, "/detail/34/", "/detail/12/"), board); err == nil {
+	if _, err := parseHuangguoRanking(strings.ReplaceAll(body, "/video/34/", "/video/12/"), board); err == nil {
 		t.Fatal("accepted duplicate IDs")
 	}
 }
@@ -135,6 +135,9 @@ func TestRankingCacheAndStaleRecovery(t *testing.T) {
 			return rankingHTTPResponse(request, 503, "temporarily unavailable"), nil
 		}
 		page, _ := strconv.Atoi(request.URL.Query().Get("page"))
+		if page == 0 {
+			page = 1
+		}
 		return rankingHTTPResponse(request, 200, rankingFixture(board, page, rankingRows(page))), nil
 	})
 	ctx := context.Background()

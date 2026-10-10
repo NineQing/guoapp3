@@ -130,25 +130,50 @@ func (d *Downloader) fetchMaoguoCatalogPage(ctx context.Context, page int, categ
 	if tagID == "" {
 		tagID = "0"
 	}
+	if page < 1 {
+		page = 1
+	}
+	var address string
 	if page > 1 {
 		signature := duanjuMD5("next_id=" + strconv.Itoa(page) + "operation=1playlet_privacy=1tag_id=" + tagID + duanjuMaoguoKey)
-		address := fmt.Sprintf("%s/api/v1/playlet/index?tag_id=%s&playlet_privacy=1&operation=1&next_id=%d&sign=%s",
+		address = fmt.Sprintf("%s/api/v1/playlet/index?tag_id=%s&playlet_privacy=1&operation=1&next_id=%d&sign=%s",
 			base, tagID, page, signature)
-		response, err := d.duanjuJSON(ctx, duanjuRequest{Source: sourceMaoguo, Address: address, Referer: base + "/", Headers: headers})
-		if err != nil {
-			return nil, false, err
-		}
-		items := maoguoCatalogItems(duanjuFindMap(response, "data"), base)
-		return items, len(items) > 0, nil
+	} else {
+		signature := duanjuMD5("operation=1playlet_privacy=1tag_id=" + tagID + duanjuMaoguoKey)
+		address = fmt.Sprintf("%s/api/v1/playlet/index?tag_id=%s&playlet_privacy=1&operation=1&sign=%s", base, tagID, signature)
 	}
-	signature := duanjuMD5("operation=1playlet_privacy=1tag_id=" + tagID + duanjuMaoguoKey)
-	address := fmt.Sprintf("%s/api/v1/playlet/index?tag_id=%s&playlet_privacy=1&operation=1&sign=%s", base, tagID, signature)
 	response, err := d.duanjuJSON(ctx, duanjuRequest{Source: sourceMaoguo, Address: address, Referer: base + "/", Headers: headers})
 	if err != nil {
 		return nil, false, err
 	}
-	items := maoguoCatalogItems(duanjuFindMap(response, "data"), base)
-	return items, false, nil
+	data := duanjuFindMap(response, "data")
+	items := maoguoCatalogItems(data, base)
+	return items, maoguoHasMore(data, page), nil
+}
+
+func maoguoHasMore(data map[string]any, page int) bool {
+	next := strings.TrimSpace(duanjuFindString(data, "next_id"))
+	if next == "" {
+		return false
+	}
+	return next != strconv.Itoa(page)
+}
+
+func maoguoTagCategories(response map[string]any) []nativeCategory {
+	var categories []nativeCategory
+	for _, entry := range duanjuFindList(duanjuFindMap(response, "data"), "tag_items") {
+		node, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(duanjuFindString(node, "tag_id", "id"))
+		name := strings.TrimSpace(duanjuFindString(node, "tag_name", "name", "title"))
+		if id == "" || name == "" || len([]rune(name)) > 24 || !validMaoguoCategory(id) {
+			continue
+		}
+		categories = append(categories, nativeCategory{ID: id, Name: name})
+	}
+	return categories
 }
 
 func maoguoCatalogItems(data map[string]any, base string) []Drama {
@@ -230,24 +255,15 @@ func (d *Downloader) fetchMaoguoCategories(ctx context.Context) ([]nativeCategor
 		return nil, err
 	}
 	base := d.duanjuBaseURL(sourceMaoguo)
-	signature := duanjuMD5("operation=1" + duanjuMaoguoKey)
-	address := fmt.Sprintf("%s/api/v1/playlet/tag/list?operation=1&sign=%s", base, signature)
+	signature := duanjuMD5("operation=1playlet_privacy=1tag_id=0" + duanjuMaoguoKey)
+	address := fmt.Sprintf("%s/api/v1/playlet/index?tag_id=0&playlet_privacy=1&operation=1&sign=%s", base, signature)
 	response, err := d.duanjuJSON(ctx, duanjuRequest{Source: sourceMaoguo, Address: address, Referer: base + "/", Headers: headers})
 	if err != nil {
 		return nil, err
 	}
-	var categories []nativeCategory
-	for _, entry := range duanjuFindList(duanjuFindMap(response, "data"), "list") {
-		node, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		id := duanjuFindString(node, "tag_id", "id")
-		name := duanjuFindString(node, "tag_name", "name", "title")
-		if id == "" || name == "" || len([]rune(name)) > 24 {
-			continue
-		}
-		categories = append(categories, nativeCategory{ID: id, Name: name})
+	categories := maoguoTagCategories(response)
+	if len(categories) == 0 {
+		return nil, errors.New("猫果分类列表为空")
 	}
 	return categories, nil
 }

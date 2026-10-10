@@ -8,7 +8,10 @@ var errNativeBuildSource = errors.New("当前版本不包含此站源")
 
 func nativeSourceAvailable(source string) bool {
 	source = canonicalProviderSource(source)
-	return source == sourceHongguo || buildAllSources == "true" && isHuangguoProviderSource(source)
+	if buildAllSources == "true" {
+		return isHuangguoProviderSource(source)
+	}
+	return source == sourceHongguo
 }
 
 func nativeDramaAvailable(drama nativeDrama) bool {
@@ -46,6 +49,7 @@ func nativeAuthorizeInput(input nativeInput) error {
 		if !found || !nativeSourceAvailable(board.Source) {
 			return errNativeBuildSource
 		}
+	case "libraryExport", "libraryImport", "libraryExportXZ", "libraryImportXZ":
 	case "catalog", "cached", "categories", "sourceStatus", "sourceJob", "cancelSourceJob":
 		if !nativeSourceAvailable(input.Source) {
 			return errNativeBuildSource

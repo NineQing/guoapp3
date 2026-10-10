@@ -9,15 +9,20 @@ import android.os.Bundle
 import android.os.BatteryManager
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.Environment
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ComponentName
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.provider.Settings
 import android.util.Rational
 import android.view.InputDevice
 import io.flutter.embedding.engine.FlutterEngine
@@ -28,6 +33,9 @@ class MainActivity : FlutterActivity() {
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
     private var televisionMode = false
+    private var pictureInPictureAutoEnter = false
+    private var pictureInPictureAspectWidth = 1600
+    private var pictureInPictureAspectHeight = 900
 
     @Suppress("DEPRECATION")
     private fun isTelevisionDevice(): Boolean {
@@ -65,6 +73,79 @@ class MainActivity : FlutterActivity() {
         super.setRequestedOrientation(
             if (televisionMode) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else requestedOrientation
         )
+    }
+
+    private fun vpnActive(): Boolean {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return manager.allNetworks.any { network ->
+            manager.getNetworkCapabilities(network)
+                ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        }
+    }
+
+    private fun physicalNetwork(manager: ConnectivityManager): Network? {
+        return manager.allNetworks.firstOrNull { network ->
+            val capabilities = manager.getNetworkCapabilities(network) ?: return@firstOrNull false
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return@firstOrNull false
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                return@firstOrNull false
+            }
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        }
+    }
+
+    private fun bindPhysicalNetwork(enabled: Boolean): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        if (!enabled) return manager.bindProcessToNetwork(null)
+        val target = physicalNetwork(manager) ?: return false
+        return manager.bindProcessToNetwork(target)
+    }
+
+    private fun hasAllFilesAccess(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = runCatching {
+                Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+            }.getOrElse { Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION) }
+            runCatching { startActivity(intent) }
+        } else {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                4712
+            )
+        }
+    }
+
+    private fun setLauncherEdition(full: Boolean): Boolean {
+        val green = ComponentName(this, "$packageName.LauncherGreen")
+        val complete = ComponentName(this, "$packageName.LauncherFull")
+        val wanted = if (full) complete else green
+        val dropped = if (full) green else complete
+        packageManager.setComponentEnabledSetting(
+            wanted,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP
+        )
+        packageManager.setComponentEnabledSetting(
+            dropped,
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP
+        )
+        return true
     }
 
     private fun playbackPower(): Map<String, Any?> {
@@ -116,6 +197,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.plugins.add(VideoSurfacePlugin())
         deviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/device")
             .also { channel ->
                 channel.setMethodCallHandler { call, result ->
@@ -140,6 +222,20 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                         "playbackPower" -> result.success(runCatching { playbackPower() }.getOrNull())
+                        "vpnActive" -> result.success(runCatching { vpnActive() }.getOrDefault(false))
+                        "hasAllFilesAccess" -> result.success(hasAllFilesAccess())
+                        "requestStorageAccess" -> {
+                            requestStorageAccess()
+                            result.success(true)
+                        }
+                        "setLauncherEdition" -> {
+                            val full = call.argument<Boolean>("full") ?: false
+                            result.success(runCatching { setLauncherEdition(full) }.getOrDefault(false))
+                        }
+                        "bindPhysicalNetwork" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: false
+                            result.success(runCatching { bindPhysicalNetwork(enabled) }.getOrDefault(false))
+                        }
                         "systemProxy" -> {
                             val connection = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
                             val proxy = connection.defaultProxy
@@ -155,6 +251,12 @@ class MainActivity : FlutterActivity() {
                             ))
                         }
                         "pictureInPictureStatus" -> result.success(pictureInPictureStatus())
+                        "configurePictureInPicture" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: false
+                            val width = call.argument<Int>("width") ?: 1600
+                            val height = call.argument<Int>("height") ?: 900
+                            result.success(configurePictureInPicture(enabled, width, height))
+                        }
                         "enterPictureInPicture" -> {
                             val width = call.argument<Int>("width") ?: 16
                             val height = call.argument<Int>("height") ?: 9
@@ -185,6 +287,44 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun configurePictureInPicture(
+        enabled: Boolean,
+        width: Int,
+        height: Int
+    ): Map<String, Any> {
+        val supported = pictureInPictureSupported()
+        pictureInPictureAutoEnter = enabled && supported
+        val safeWidth = width.coerceIn(1, 10000)
+        val safeHeight = height.coerceIn(1, 10000)
+        pictureInPictureAspectWidth = safeWidth
+        pictureInPictureAspectHeight = safeHeight
+        if (supported) {
+            runCatching {
+                val builder = PictureInPictureParams.Builder()
+                builder.setAspectRatio(Rational(safeWidth, safeHeight))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    builder.setAutoEnterEnabled(pictureInPictureAutoEnter)
+                }
+                setPictureInPictureParams(builder.build())
+            }
+        }
+        return pictureInPictureStatus() + ("autoEnter" to pictureInPictureAutoEnter)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        if (!pictureInPictureAutoEnter || isInPictureInPictureMode) return
+        if (!pictureInPictureSupported()) return
+        runCatching {
+            val builder = PictureInPictureParams.Builder()
+            builder.setAspectRatio(
+                Rational(pictureInPictureAspectWidth, pictureInPictureAspectHeight)
+            )
+            enterPictureInPictureMode(builder.build())
+        }
+    }
+
     private fun enterPlayerPictureInPicture(
         width: Int,
         height: Int,
@@ -204,7 +344,7 @@ class MainActivity : FlutterActivity() {
                 builder.setSourceRectHint(Rect(left, top, right, bottom))
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setAutoEnterEnabled(true)
+                builder.setAutoEnterEnabled(pictureInPictureAutoEnter)
             }
             val entered = enterPictureInPictureMode(builder.build())
             pictureInPictureStatus() + ("requested" to entered)

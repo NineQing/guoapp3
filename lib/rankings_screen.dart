@@ -1,11 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'app_layout.dart';
 import 'catalog_filters.dart';
 import 'core_bridge.dart';
-import 'detail_screen.dart';
 import 'local_store.dart';
 import 'models.dart';
+import 'playback_launch_screen.dart';
 import 'ranking_models.dart';
 import 'remote_widgets.dart';
 import 'widgets.dart';
@@ -358,14 +360,12 @@ class _RankingsScreenState extends State<RankingsScreen> {
     VoidCallback? onFocus,
   }) {
     final theme = Theme.of(context);
-    void open() => Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DetailScreen(
-          drama: item.drama,
-          repository: widget.repository,
-          store: widget.store,
-        ),
+    void open() => unawaited(
+      openPlaybackDirectly(
+        context,
+        drama: item.drama,
+        repository: widget.repository,
+        store: widget.store,
       ),
     );
     final body = Padding(

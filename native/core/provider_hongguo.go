@@ -50,6 +50,11 @@ func (d *Downloader) fetchHongguoWebDramas(ctx context.Context) ([]Drama, error)
 	for _, route := range routes {
 		route := route
 		go func() {
+			defer func() {
+				if recover() != nil {
+					results <- routeResult{err: errors.New("红果线路处理失败")}
+				}
+			}()
 			dramas, err := d.fetchHongguoRoute(ctx, route.path, route.name)
 			results <- routeResult{dramas: dramas, err: err}
 		}()

@@ -66,7 +66,9 @@ func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
 	if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
 		return false
 	}
-	return transport.hosts[strings.ToLower(request.URL.Host)] || transport.hosts[strings.ToLower(request.URL.Hostname())]
+	return transport.hosts[strings.ToLower(request.URL.Host)] ||
+		transport.hosts[strings.ToLower(request.URL.Hostname())] ||
+		mediaEdgeHost(request.URL.String()) != ""
 }
 
 func (transport *huangguoBrowserTransport) createClient(proxy string) (browserHTTPClient, error) {

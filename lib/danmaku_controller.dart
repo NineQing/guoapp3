@@ -34,6 +34,8 @@ class DanmakuController extends ChangeNotifier {
   int _anchorPosition = 0;
   double _anchorRate = 1;
   bool _anchorMoving = false;
+  int _publishedPosition = 0;
+  bool _publishedVisible = false;
 
   bool get supported =>
       _plan != null &&
@@ -75,7 +77,7 @@ class DanmakuController extends ChangeNotifier {
     _available = false;
     positionMs = durationMs = 0;
     _resetMotion();
-    notifyListeners();
+    _publish();
   }
 
   void setEnabled(bool enabled) {
@@ -86,7 +88,7 @@ class DanmakuController extends ChangeNotifier {
     _pages.clear();
     _rebuildItems();
     _resetMotion();
-    notifyListeners();
+    _publish();
     _ensureWindow();
   }
 
@@ -138,16 +140,38 @@ class DanmakuController extends ChangeNotifier {
     _foreground = foreground;
     _available = available;
     if (wasVisible && !visible) _cancel();
-    if (drift ||
+    final resync =
+        drift ||
         jumped ||
         durationChanged ||
         wasVisible != visible ||
         wasMoving != moving ||
-        previousRate != rate) {
-      _resetMotion();
+        previousRate != rate;
+    if (resync) _resetMotion();
+    final entered = visible != _publishedVisible;
+    final crossed = visible && _crossesBoundary(_publishedPosition, positionMs);
+    if (resync || entered || crossed) {
+      _publishedPosition = positionMs;
+      _publishedVisible = visible;
+      _publish();
     }
-    notifyListeners();
     _ensureWindow();
+  }
+
+  void _publish() {
+    _publishedPosition = positionMs;
+    _publishedVisible = visible;
+    notifyListeners();
+  }
+
+  bool _crossesBoundary(int from, int to) {
+    if (to <= from) return false;
+    for (final item in items) {
+      if (item.timeMs > from && item.timeMs <= to) return true;
+      final end = item.timeMs + danmakuLifetimeMs;
+      if (end > from && end <= to) return true;
+    }
+    return false;
   }
 
   void beginSeek() {
@@ -155,7 +179,7 @@ class DanmakuController extends ChangeNotifier {
     _cancel();
     _seeking = true;
     _resetMotion();
-    notifyListeners();
+    _publish();
   }
 
   void endSeek(Duration position) {
@@ -163,7 +187,7 @@ class DanmakuController extends ChangeNotifier {
     _seeking = false;
     positionMs = position.inMilliseconds.clamp(0, danmakuMaxDurationMs);
     _resetMotion();
-    notifyListeners();
+    _publish();
     _ensureWindow();
   }
 
@@ -171,7 +195,7 @@ class DanmakuController extends ChangeNotifier {
     if (_closed || !visible) return;
     _failures.clear();
     _ensureWindow();
-    notifyListeners();
+    _publish();
   }
 
   void _resetMotion() {
@@ -226,7 +250,7 @@ class DanmakuController extends ChangeNotifier {
     final plan = _plan!;
     final duration = durationMs;
     _pendingStart = start;
-    notifyListeners();
+    _publish();
     try {
       final page = await repository.danmaku(
         plan,
@@ -263,7 +287,7 @@ class DanmakuController extends ChangeNotifier {
     } finally {
       if (!_closed && ticket == _generation) {
         _pendingStart = null;
-        notifyListeners();
+        _publish();
         _ensureWindow();
       }
     }

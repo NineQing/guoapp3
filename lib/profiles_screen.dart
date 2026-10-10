@@ -6,14 +6,22 @@ import 'package:flutter/material.dart';
 
 import 'local_profiles.dart';
 import 'local_store.dart';
+import 'core_bridge.dart';
 import 'models.dart';
 import 'app_build.dart';
+import 'library_transfer_actions.dart';
 import 'remote_widgets.dart';
 
 class ProfilesScreen extends StatefulWidget {
-  const ProfilesScreen({super.key, required this.store, this.locked = false});
+  const ProfilesScreen({
+    super.key,
+    required this.store,
+    this.locked = false,
+    this.repository,
+  });
   final LocalStore store;
   final bool locked;
+  final AppRepository? repository;
   @override
   State<ProfilesScreen> createState() => _ProfilesScreenState();
 }
@@ -21,11 +29,33 @@ class ProfilesScreen extends StatefulWidget {
 class _ProfilesScreenState extends State<ProfilesScreen> {
   bool _busy = false;
   String? _error;
+  String? _libraryMessage;
 
   @override
   void initState() {
     super.initState();
     ensureTelevisionFocus(context);
+  }
+
+  Future<void> _libraryTransfer(bool restore) async {
+    final repository = widget.repository;
+    if (repository == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _libraryMessage = null;
+    });
+    try {
+      final transfer = LibraryTransfer(repository);
+      final outcome = restore
+          ? await transfer.importLibrary()
+          : await transfer.exportLibrary();
+      if (mounted) setState(() => _libraryMessage = outcome.message);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _recover({bool export = false, bool reload = false}) async {
@@ -200,6 +230,34 @@ class _ProfilesScreenState extends State<ProfilesScreen> {
                     onChanged: _busy ? null : _setForceLogin,
                   ),
                 ],
+              ],
+              if (widget.locked && widget.repository != null) ...[
+                const Divider(height: 32),
+                Text('剧库导入导出', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                const Text('不需要登录：剧库文件只含剧集条目，导入按 ID 合并补全，不删除本地内容。'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _libraryTransfer(false),
+                      icon: const Icon(Icons.save_alt_rounded),
+                      label: const Text('导出剧库'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _libraryTransfer(true),
+                      icon: const Icon(Icons.library_add_outlined),
+                      label: const Text('导入剧库'),
+                    ),
+                  ],
+                ),
+                if (_libraryMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SelectableText(_libraryMessage!),
+                  ),
               ],
               if (_busy)
                 const Padding(
@@ -425,7 +483,9 @@ class _ProfileEditorState extends State<ProfileEditor> {
             const SizedBox(height: 20),
             if (widget.profile?.admin != true) ...[
               Text('允许访问的站源', style: Theme.of(context).textTheme.titleMedium),
-              for (final source in SourceSite.values)
+              for (final source in widget.store.sources.where(
+                (site) => !site.adult || !widget.store.greenMode,
+              ))
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,

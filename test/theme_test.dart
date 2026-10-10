@@ -104,9 +104,9 @@ void main() {
     final repository = FixtureRepository();
     await tester.pumpWidget(DuanjuApp(repository: repository, store: store));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('bottom-nav-1')));
+    await tester.tap(find.byKey(const ValueKey('bottom-nav-2')));
     await tester.pumpAndSettle();
-    expect(find.text('追剧'), findsOneWidget);
+    expect(find.text('我的追剧'), findsOneWidget);
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('设置与备份'));
@@ -130,7 +130,7 @@ void main() {
     );
     await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
-    expect(find.text('追剧'), findsOneWidget);
+    expect(find.text('我的追剧'), findsOneWidget);
     expect(
       tester
           .widget<AppBottomNavigation>(find.byType(AppBottomNavigation))
@@ -152,11 +152,42 @@ void main() {
       Brightness.light,
     );
     expect(repository.requests.length, requests);
-    expect(find.text('追剧'), findsOneWidget);
+    expect(find.text('我的追剧'), findsOneWidget);
     tester.platformDispatcher.clearPlatformBrightnessTestValue();
     await tester.pumpWidget(const SizedBox.shrink());
     store.dispose();
   });
+
+  testWidgets(
+    'settings list keeps the last entry above the system navigation',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+      addTearDown(tester.view.reset);
+      final store = await localStore();
+      final repository = FixtureRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(repository: repository, store: store),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final list = tester.widget<ListView>(find.byType(ListView));
+      expect((list.padding! as EdgeInsets).bottom, 50);
+      await tester.scrollUntilVisible(find.text('导入剧库'), 120);
+      await tester.pumpAndSettle();
+      expect(find.text('导入剧库'), findsOneWidget);
+      final importRect = tester.getRect(find.text('导入剧库'));
+      expect(
+        importRect.bottom,
+        lessThanOrEqualTo(844 - 34),
+        reason: '最后一项要留在系统手势条上方',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      store.dispose();
+    },
+  );
 
   for (final count in [3, 4]) {
     testWidgets(
@@ -189,7 +220,7 @@ void main() {
                       ),
                       const NavigationDestination(
                         icon: Icon(Icons.history),
-                        label: '最近观看',
+                        label: '历史',
                       ),
                       if (count == 4)
                         const NavigationDestination(
@@ -218,7 +249,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(selected, i);
         }
-        expect(find.text('最近观看'), findsOneWidget);
+        expect(find.text('历史'), findsOneWidget);
         semantics.dispose();
         expect(tester.takeException(), isNull);
       },

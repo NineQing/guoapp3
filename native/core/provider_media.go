@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -27,6 +28,9 @@ func (d *Downloader) providerBaseURL(source string) string {
 	switch source {
 	case sourceHuangguoAI:
 		configured, fallback = d.cfg.HuangguoAIURL, huangguoAIBaseURL
+		if configured != "" && huangguoAIIsDeprecatedRoute(configured) {
+			configured = ""
+		}
 	case sourceHuangguoVideo:
 		configured, fallback = d.cfg.HuangguoVideoURL, huangguoVideoBaseURL
 	case sourceHuangdou:
@@ -55,7 +59,7 @@ func providerSourceForURL(raw string) string {
 	}
 	host := strings.ToLower(parsed.Hostname())
 	switch {
-	case host == "huangguoai.com" || strings.HasSuffix(host, ".ediayikma.cc") || strings.HasSuffix(host, ".agdkczeyx.cc"):
+	case host == "huangguoai.ai" || huangguoAIIsContentHost(host):
 		return sourceHuangguoAI
 	case host == "huangguo.video":
 		return sourceHuangguoVideo
@@ -85,6 +89,7 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	parsed, _ := url.Parse(raw)
 	d.providerMu.Lock()
 	preferred := d.providerHosts[source]
+	routes := append([]string(nil), d.huangguoAIRoutes...)
 	d.providerMu.Unlock()
 	var candidates []string
 	seen := map[string]bool{}
@@ -96,7 +101,20 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	}
 	add(rehostProviderURL(parsed, preferred))
 	configured := d.providerBaseURL(source)
+	if source == sourceHuangguoAI && !huangguoAIIsContentRoute(configured) {
+		for _, route := range routes {
+			add(rehostProviderURL(parsed, route))
+		}
+		if len(candidates) > 0 {
+			return candidates
+		}
+	}
 	add(rehostProviderURL(parsed, configured))
+	if source == sourceHuangguoAI {
+		for _, route := range routes {
+			add(rehostProviderURL(parsed, route))
+		}
+	}
 	if providerSourceForURL(configured) == "" {
 		return candidates
 	}
@@ -138,7 +156,7 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 			}
 			matched := false
 			for _, fresh := range chapters {
-				if fresh.ID == chapter.ID {
+				if fresh.ID == chapter.ID || chapterEpisodeNumber(fresh, 0) == chapterEpisodeNumber(chapter, task.Index) {
 					chapter = fresh
 					matched = true
 					break
@@ -168,12 +186,33 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	if chapter.PageURL != "" && (chapter.Source == sourceHuangguoAI || chapter.Source == sourceHuangguoVideo) {
 		responses := &playbackResponseURLs{}
 		pageContext := context.WithValue(ctx, playbackResponseURLsKey{}, responses)
-		body, err := d.fetchProviderText(pageContext, chapter.PageURL, media.Referer)
+		pageURL := chapter.PageURL
+		if chapter.Source == sourceHuangguoAI {
+			sourceID := ""
+			if _, parsedID, ok := splitProviderDramaID(task.DramaID); ok {
+				sourceID = parsedID
+			}
+			if sourceID == "" {
+				return providerMedia{}, fmt.Errorf("黄果播放页缺少有效剧集 ID")
+			}
+			episode := chapter.EpisodeString(task.Index)
+			base := d.huangguoAIContentBaseURL(ctx)
+			pageURL = huangguoAIPlaybackPageURL(base, sourceID, episode)
+			pageContext = context.WithValue(pageContext, providerTextValidatorKey{}, providerTextValidator(func(body, effectiveURL string) error {
+				if err := validateHuangguoAIPlaybackPage(body, effectiveURL, sourceID, episode); err != nil {
+					return err
+				}
+				if mediaURL := parseAIVideoURL(body, effectiveURL); !isProviderHTTPMediaURL(mediaURL) {
+					return errors.New("黄果播放页未返回有效播放地址")
+				}
+				return nil
+			}))
+		}
+		body, err := d.fetchProviderText(pageContext, pageURL, media.Referer)
 		if err != nil {
 			return providerMedia{}, err
 		}
-		pageURL := chapter.PageURL
-		if actual, ok := responses.values.Load(chapter.PageURL); ok {
+		if actual, ok := responses.values.Load(pageURL); ok {
 			pageURL = actual.(string)
 		}
 		if chapter.Source == sourceHuangguoAI {
@@ -188,18 +227,14 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	parsed, _ := url.Parse(media.URL)
 	if strings.HasSuffix(strings.ToLower(parsed.Path), ".m3u8") {
-		playlist, finalURL, err := d.fetchMediaPlaylist(ctx, media.URL, media.Referer)
+		selected, err := d.fetchMediaPlaylistForMedia(ctx, media)
 		if err != nil {
 			return providerMedia{}, fmt.Errorf("获取播放列表失败: %w", err)
 		}
-		if !strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(playlist, "\ufeff")), "#EXTM3U") {
+		if !strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(selected.Playlist, "\ufeff")), "#EXTM3U") {
 			return providerMedia{}, fmt.Errorf("站点未返回有效 M3U8，可能需要登录或链接已失效")
 		}
-		if duration := m3u8Duration(playlist); duration > 0 {
-			media.Duration = duration
-		}
-		media.Playlist = playlist
-		media.URL = finalURL
+		media = selected
 	}
 	return media, nil
 }

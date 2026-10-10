@@ -26,6 +26,8 @@ class TelevisionControls extends StatefulWidget {
     required this.onEpisodes,
     required this.onSettings,
     required this.onBack,
+    this.onSleepTimer,
+    this.sleepTimerLabel = '',
     this.enhancement,
   });
   final Player player;
@@ -39,6 +41,8 @@ class TelevisionControls extends StatefulWidget {
   final Future<void> Function() onEpisodes;
   final Future<void> Function() onSettings;
   final VoidCallback onBack;
+  final Future<void> Function()? onSleepTimer;
+  final String sleepTimerLabel;
   final VideoEnhancementController? enhancement;
 
   @override
@@ -57,24 +61,29 @@ class _TelevisionControlsState extends State<TelevisionControls> {
   bool _visible = true;
   bool _panelOpen = false;
   bool _seekHint = false;
+  Timer? _progressTimer;
+  DateTime? _progressPaintedAt;
 
   @override
   void initState() {
     super.initState();
     _visible = widget.showOnPlaybackReady;
     for (final stream in [
-      widget.player.stream.position,
       widget.player.stream.duration,
-      widget.player.stream.buffer,
       widget.player.stream.playing,
       widget.player.stream.buffering,
     ]) {
       _subscriptions.add(
         stream.listen((_) {
-          if (!mounted) return;
-          setState(() {});
+          if (mounted) setState(() {});
         }),
       );
+    }
+    for (final stream in [
+      widget.player.stream.position,
+      widget.player.stream.buffer,
+    ]) {
+      _subscriptions.add(stream.listen((_) => _tickProgress()));
     }
     _subscriptions.add(
       widget.player.stream.playing.listen((playing) {
@@ -231,6 +240,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
   void dispose() {
     _hideTimer?.cancel();
     _seekTimer?.cancel();
+    _progressTimer?.cancel();
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
@@ -239,6 +249,30 @@ class _TelevisionControlsState extends State<TelevisionControls> {
     }
     super.dispose();
   }
+
+  static const _progressInterval = Duration(milliseconds: 240);
+
+  void _tickProgress() {
+    if (!mounted || !_tvVisible) return;
+    final now = DateTime.now();
+    final paintedAt = _progressPaintedAt;
+    if (paintedAt == null || now.difference(paintedAt) >= _progressInterval) {
+      _progressPaintedAt = now;
+      _progressTimer?.cancel();
+      _progressTimer = null;
+      setState(() {});
+      return;
+    }
+    if (_progressTimer?.isActive ?? false) return;
+    _progressTimer = Timer(_progressInterval - now.difference(paintedAt), () {
+      _progressTimer = null;
+      if (!mounted || !_tvVisible) return;
+      _progressPaintedAt = DateTime.now();
+      setState(() {});
+    });
+  }
+
+  bool get _tvVisible => _visible || _seekHint || widget.player.state.buffering;
 
   @override
   Widget build(BuildContext context) {
@@ -431,6 +465,16 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                                     },
                                   );
                                 },
+                              ),
+                            if (widget.onSleepTimer != null)
+                              RemoteButton(
+                                key: const ValueKey('tv-sleep-timer'),
+                                label: widget.sleepTimerLabel.isEmpty
+                                    ? '睡眠定时'
+                                    : '定时 · ${widget.sleepTimerLabel}',
+                                icon: Icons.bedtime_outlined,
+                                onPressed: () =>
+                                    _openPanel(widget.onSleepTimer!, _settings),
                               ),
                             RemoteButton(
                               key: const ValueKey('tv-settings'),

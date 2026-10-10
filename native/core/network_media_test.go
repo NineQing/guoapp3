@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,92 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+func TestParseAIVideoInitialDataPrefersRequestedEpisode(t *testing.T) {
+	body := `<script id="videoInitialData" type="application/json">{"id":"365","ep":"2","videoSrc":"https://media.example/episode-1.m3u8","epPlaySrcs":{"1":"https://media.example/episode-1.m3u8","2":"https://media.example/episode-2.m3u8"}}</script>`
+	if got := parseAIVideoURL(body, "https://route.hwqlgzvsk.cc/video/365/ep-2/"); got != "https://media.example/episode-2.m3u8" {
+		t.Fatalf("wrong episode media: %s", got)
+	}
+	if got := parseAIVideoURL(body, "https://route.hwqlgzvsk.cc/video/365/ep-3/"); got != "" {
+		t.Fatalf("missing episode fell back to another media: %s", got)
+	}
+	if err := validateHuangguoAIPlaybackPage(body, "https://route.hwqlgzvsk.cc/video/365/ep-2/", "365", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateHuangguoAIPlaybackPage(body, "https://route.hwqlgzvsk.cc/video/365/ep-2/", "366", "2"); err == nil {
+		t.Fatal("accepted mismatched drama id")
+	}
+	if err := validateHuangguoAIPlaybackPage(body, "https://route.hwqlgzvsk.cc/video/365/ep-2/", "365", "3"); err == nil || !strings.Contains(fmt.Sprint(err), "分集不符") {
+		t.Fatalf("accepted mismatched episode: %v", err)
+	}
+}
+
+func TestHuangguoAIEpisodeParsingIsScopedToCurrentDrama(t *testing.T) {
+	body := `
+		<a href="/video/6139/">第1集</a>
+		<a href="/video/6139/ep-2/">第2集</a>
+		<a href="/video/6139/ep-3/">第3集</a>
+		<a href="/video/6139/ep-4/">第4集</a>
+		<a href="/video/6139/ep-5/">第5集</a>
+		<section class="recommend">
+			<a href="/video/365/">AI极品家丁</a>
+			<a href="/video/7180/ep-27/">其它推荐</a>
+		</section>
+	`
+	episodes := parseHuangguoAIEpisodes(body, "https://route.hwqlgzvsk.cc/video/6139/", "6139")
+	if len(episodes) != 5 {
+		t.Fatalf("unrelated videos polluted episode list: %+v", episodes)
+	}
+	for index, episode := range episodes {
+		if episode.Index != index+1 || detailIDFromString(episode.URL) != "6139" {
+			t.Fatalf("wrong episode identity: %+v", episode)
+		}
+	}
+}
+
+func TestHuangguoAIEpisodeParsingUsesInitialDataTotal(t *testing.T) {
+	body := `<script id="videoInitialData" type="application/json">{"id":"6139","total":"6","epPlaySrcs":{"1":"https://media.example/one.m3u8","2":"https://media.example/two.m3u8"}}</script><a href="/video/365/">其它推荐</a>`
+	episodes := parseHuangguoAIEpisodes(body, "https://route.hwqlgzvsk.cc/video/6139/", "6139")
+	if len(episodes) != 6 {
+		t.Fatalf("initial data total was not used: %+v", episodes)
+	}
+	if episodes[0].HLS != "https://media.example/one.m3u8" || episodes[1].HLS != "https://media.example/two.m3u8" {
+		t.Fatalf("initial data media was not attached: %+v", episodes[:2])
+	}
+	for _, episode := range episodes {
+		if detailIDFromString(episode.URL) != "6139" {
+			t.Fatalf("wrong initial-data episode URL: %+v", episode)
+		}
+	}
+}
+
+func TestHuangguoAIEpisodeParsingHandlesHyphenatedEpisodeURLs(t *testing.T) {
+	body := `<script id="videoInitialData" type="application/json">{"id":"365","epPlaySrcs":{"1":"https://media.example/one.m3u8","2":"https://media.example/two.m3u8"}}</script>
+		<a href="/video/365/">01</a>
+		<a href="/video/365/ep-2/">02</a>
+		<a href="/video/365/ep-3/">03</a>
+		<a href="/video/365/ep-4/">04</a>
+		<a href="/video/365/ep-5/">05</a>
+		<a href="/video/365/ep-6/">06</a>
+		<a href="/video/365/ep-7/">07</a>
+		<a href="/video/365/ep-8/">08</a>
+		<a href="/video/365/ep-9/">09</a>
+		<a href="/video/365/ep-10/">10</a>
+		<a href="/video/365/ep-11/">11</a>
+		<a href="/video/365/ep-12/">12</a>`
+	episodes := parseHuangguoAIEpisodes(body, "https://route.hwqlgzvsk.cc/video/365/", "365")
+	if len(episodes) != 12 {
+		t.Fatalf("hyphenated episode URLs were not merged: %+v", episodes)
+	}
+	for index, episode := range episodes {
+		if episode.Index != index+1 || detailIDFromString(episode.URL) != "365" {
+			t.Fatalf("wrong episode identity: %+v", episode)
+		}
+	}
+	if episodes[1].HLS != "https://media.example/two.m3u8" {
+		t.Fatalf("initial-data media was not kept for episode 2: %+v", episodes[1])
+	}
+}
 
 func TestHuangguoMediaUsesBrowserSessionPageRefererAndPreviewToken(t *testing.T) {
 	var previews, keys atomic.Int32

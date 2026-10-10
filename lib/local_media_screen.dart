@@ -1,3 +1,5 @@
+import 'player_route.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -127,8 +129,8 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
     }, 1);
     await Navigator.push(
       context,
-      MaterialPageRoute<void>(
-        builder: (_) => PlayerScreen(
+      playerRoute(
+        PlayerScreen(
           detail: DramaDetail(item.drama, [episode]),
           initialIndex: 0,
           initialPosition: watch == null || watch.finished ? 0 : watch.position,
@@ -415,6 +417,9 @@ class _LocalFileRepository extends AppRepository {
     force: force,
   );
   @override
+  Future<CatalogPage> searchProgress(String source, String query) =>
+      parent.searchProgress(source, query);
+  @override
   Future<CatalogPage> cached(String source, {String category = ''}) =>
       parent.cached(source, category: category);
   @override
@@ -423,8 +428,11 @@ class _LocalFileRepository extends AppRepository {
     bool force = false,
   }) => parent.categories(source, force: force);
   @override
-  Future<String> cover(Drama drama, {bool force = false}) =>
-      parent.cover(drama, force: force);
+  Future<String> cover(
+    Drama drama, {
+    bool force = false,
+    bool refresh = false,
+  }) => parent.cover(drama, force: force, refresh: refresh);
   @override
   Future<DramaDetail> detail(Drama drama) => parent.detail(drama);
   @override

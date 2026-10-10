@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as path;
@@ -19,6 +20,9 @@ import 'cover_decoder.dart';
 import 'catalog_updates.dart';
 import 'download_collections.dart';
 import 'resource_settings.dart';
+import 'network_exit.dart';
+import 'library_transfer.dart';
+import 'native_response_parser.dart';
 
 typedef _NativeRequest = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _DartRequest = Pointer<Utf8> Function(Pointer<Utf8>);
@@ -65,6 +69,22 @@ class AppFailure implements Exception {
   @override
   String toString() => message;
 }
+
+/// 未解锁当前用户也允许执行的动作。
+///
+/// 剧库导入导出只读写本机剧库条目，文件属于本机用户；网页版把入口放在管理员设置里，
+/// APP 不需要先登录，因此在锁屏上也要可用。
+const unlockedActions = <String>{
+  'initialize',
+  'release',
+  'cancelPlayback',
+  'cancelRead',
+  'updateSystemProxy',
+  'libraryExport',
+  'libraryImport',
+  'libraryExportXZ',
+  'libraryImportXZ',
+};
 
 abstract class AppRepository {
   Future<Map<String, dynamic>> lan(
@@ -177,8 +197,19 @@ abstract class AppRepository {
     String category = '',
     bool force = false,
   });
+  Future<CatalogPage> searchProgress(String source, String query);
   Future<CatalogPage> cached(String source, {String category = ''});
-  Future<String> cover(Drama drama, {bool force = false});
+  Future<String> cover(Drama drama, {bool force = false, bool refresh = false});
+  Future<Map<String, dynamic>> exportLibrary() async =>
+      throw AppFailure('当前环境不支持剧库导出');
+  Future<LibraryImportResult> importLibrary(
+    Map<String, dynamic> document,
+  ) async => throw AppFailure('当前环境不支持剧库导入');
+  Future<Uint8List> exportLibraryPackage() async =>
+      throw AppFailure('当前环境不支持剧库导出');
+  Future<LibraryImportResult> importLibraryPackage(Uint8List payload) async =>
+      throw AppFailure('当前环境不支持剧库导入');
+  int get libraryPackageCount => 0;
   Future<DramaDetail> detail(Drama drama);
   Future<PlaybackPlan> resolve(Drama drama, Episode episode, {int quality = 0});
   Future<PlaybackPlan> fallback(PlaybackPlan current);
@@ -194,6 +225,7 @@ class NativeRepository extends AppRepository {
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
   final _activeReads = <String, int>{};
+  final _boardSources = <String, String>{};
 
   @override
   Future<Map<String, dynamic>> lan(
@@ -246,6 +278,16 @@ class NativeRepository extends AppRepository {
         'settings': settings.toJson(),
       }),
     );
+  }
+
+  Future<CatalogPage> _catalogPage(Future<Map<String, dynamic>> request) async {
+    final epoch = access?.profileEpoch;
+    final data = await request;
+    final page = await parseNativeCatalog(data);
+    if (epoch != access?.profileEpoch) {
+      throw AppFailure('用户已切换，请重新操作');
+    }
+    return page;
   }
 
   Future<Map<String, dynamic>> _read(
@@ -342,8 +384,8 @@ class NativeRepository extends AppRepository {
     bool force = false,
   }) async {
     _authorize('hongguo');
-    return CatalogPage.fromJson(
-      await _read('recommendations-$genre', {
+    return _catalogPage(
+      _read('recommendations-$genre', {
         'action': 'recommendations',
         'category': genre,
         'command': more ? 'more' : '',
@@ -372,10 +414,16 @@ class NativeRepository extends AppRepository {
   @override
   Future<List<RankingBoard>> rankingBoards() async {
     final result = await _call({'action': 'rankingBoards'});
-    return [
-          for (final row in result['items'] as List? ?? [])
-            RankingBoard.fromJson(Map<String, dynamic>.from(row as Map)),
-        ]
+    final boards = [
+      for (final row in result['items'] as List? ?? [])
+        RankingBoard.fromJson(Map<String, dynamic>.from(row as Map)),
+    ];
+    for (final board in boards) {
+      if (board.id.isNotEmpty && board.source.isNotEmpty) {
+        _boardSources[board.id] = board.source;
+      }
+    }
+    return boards
         .where(
           (board) =>
               SourceSite.isAvailable(board.source) &&
@@ -498,17 +546,58 @@ class NativeRepository extends AppRepository {
   );
   int _playbackSequence = DateTime.now().microsecondsSinceEpoch;
 
+  @override
+  Future<Map<String, dynamic>> exportLibrary() =>
+      _call({'action': 'libraryExport'});
+
+  @override
+  Future<LibraryImportResult> importLibrary(
+    Map<String, dynamic> document,
+  ) async => LibraryImportResult.fromJson(
+    await _call({'action': 'libraryImport', 'library': document}),
+  );
+
+  @override
+  Future<Uint8List> exportLibraryPackage() async {
+    final result = await _call({'action': 'libraryExportXZ'});
+    libraryPackageCount = (result['count'] as num?)?.toInt() ?? 0;
+    return base64Decode(result['payload'] as String? ?? '');
+  }
+
+  @override
+  int libraryPackageCount = 0;
+
+  @override
+  Future<LibraryImportResult> importLibraryPackage(Uint8List payload) async =>
+      LibraryImportResult.fromJson(
+        await _call({
+          'action': 'libraryImportXZ',
+          'payload': base64Encode(payload),
+        }),
+      );
+
+  /// 先用当前出口请求；失败且错误特征指向出口被拒、同时系统开着 VPN 时，
+  /// 临时把进程绑到物理网络重试一次，随后恢复。这样既能让必须本机出口的
+  /// 站源在挂代理时照样可用，也不会影响只有走代理才连得上的站源。
+  Future<String> _invokeNative(String body, Duration limit) async {
+    try {
+      return await Isolate.run(() => _nativeRequest(body)).timeout(limit);
+    } on Object catch (error) {
+      if (!NetworkExit.worthBypassing(error)) rethrow;
+      if (!await NetworkExit.borrow()) rethrow;
+      try {
+        return await Isolate.run(() => _nativeRequest(body)).timeout(limit);
+      } finally {
+        await NetworkExit.release();
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> _call(Map<String, dynamic> input) async {
     try {
       final action = input['action'] as String;
       final unrestricted =
-          {
-            'initialize',
-            'release',
-            'cancelPlayback',
-            'cancelRead',
-            'updateSystemProxy',
-          }.contains(action) ||
+          unlockedActions.contains(action) ||
           action == 'workLease' && input['command'] == 'end' ||
           action == 'lan' &&
               {
@@ -520,7 +609,8 @@ class NativeRepository extends AppRepository {
       final epoch = access?.profileEpoch;
       if (!unrestricted && access?.locked == true) throw AppFailure('请先解锁当前用户');
       if (action == 'rankings') {
-        _authorize(RankingBoard.sourceForID(input['board'] as String));
+        final board = input['board'] as String;
+        _authorize(_boardSources[board] ?? RankingBoard.sourceForID(board));
       }
       if (action == 'recommendations' ||
           action == 'cachedRecommendations' ||
@@ -570,21 +660,22 @@ class NativeRepository extends AppRepository {
         input['force'] = true;
       }
       final body = jsonEncode(input);
-      final encoded = await Isolate.run(() => _nativeRequest(body)).timeout(
-        Duration(
-          seconds: action == 'moveDownloads'
-              ? 620
-              : action == 'danmaku'
-              ? 15
-              : action == 'preload'
-              ? 20
-              : 70,
-        ),
+      final limit = Duration(
+        seconds: action == 'moveDownloads'
+            ? 620
+            : action == 'danmaku'
+            ? 15
+            : action == 'preload'
+            ? 20
+            : action == 'libraryImport'
+            ? 180
+            : 70,
       );
-      final response = jsonDecode(encoded) as Map<String, dynamic>;
+      final encoded = await _invokeNative(body, limit);
+      final response = await decodeNativeResponse(encoded);
       if (response['ok'] != true) {
         throw AppFailure(
-          response['error'] as String? ?? '读取失败，请重试',
+          NetworkExit.describe(response['error'] as String? ?? '读取失败，请重试'),
           code: response['code'] as String? ?? '',
         );
       }
@@ -669,8 +760,8 @@ class NativeRepository extends AppRepository {
     String query = '',
     String category = '',
     bool force = false,
-  }) async => CatalogPage.fromJson(
-    await _read('catalog-$source', {
+  }) async => _catalogPage(
+    _read('catalog-$source', {
       'action': 'catalog',
       'source': source,
       'page': page,
@@ -680,22 +771,58 @@ class NativeRepository extends AppRepository {
     }),
   );
   @override
-  Future<CatalogPage> cached(String source, {String category = ''}) async =>
-      CatalogPage.fromJson(
-        await _call({
-          'action': 'cached',
-          'source': source,
-          'category': category,
-        }),
-      );
+  Future<CatalogPage> searchProgress(String source, String query) async {
+    final request = _call({
+      'action': 'searchProgress',
+      'source': source,
+      'query': query,
+    });
+    return _catalogPage(request);
+  }
+
   @override
-  Future<String> cover(Drama drama, {bool force = false}) async {
+  Future<CatalogPage> cached(String source, {String category = ''}) async {
+    final request = _call({
+      'action': 'cached',
+      'source': source,
+      'category': category,
+    });
+    return _catalogPage(request);
+  }
+
+  @override
+  Future<String> cover(
+    Drama drama, {
+    bool force = false,
+    bool refresh = false,
+  }) async {
     final epoch = access?.profileEpoch;
     final result = await _call({
       'action': 'cover',
       'drama': drama.toJson(),
       'force': force,
+      'refresh': refresh,
     });
+    final freshCover = result['cover'] as String? ?? '';
+    if (freshCover.isNotEmpty && freshCover != drama.cover) {
+      final current = catalogUpdates.current(drama);
+      final updated = current.merge(
+        Drama(
+          id: current.id,
+          source: current.source,
+          sourceId: current.sourceId,
+          title: current.title,
+          cover: freshCover,
+        ),
+      );
+      catalogUpdates.publish(updated);
+      if (access != null) {
+        await access!.refreshDrama(updated);
+      }
+    }
+    if (refresh) {
+      catalogUpdates.publish(catalogUpdates.current(drama), retryCover: true);
+    }
     final file = result['path'] as String? ?? '';
     if (file.isEmpty) throw AppFailure('海报暂不可用');
     if (result['heic'] != true) return file;

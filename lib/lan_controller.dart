@@ -22,6 +22,7 @@ part 'lan_playback.dart';
 class LanController extends ChangeNotifier with WidgetsBindingObserver {
   LanController(this.repository, this.store, {required this.kind}) {
     store.addListener(_storeChanged);
+    store.libraryChanges.addListener(_storeChanged);
     WidgetsBinding.instance.addObserver(this);
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
     _storeChanged();
@@ -942,6 +943,7 @@ class LanController extends ChangeNotifier with WidgetsBindingObserver {
     _run++;
     _syncTicket++;
     store.removeListener(_storeChanged);
+    store.libraryChanges.removeListener(_storeChanged);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _gather?.cancel();

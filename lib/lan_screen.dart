@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_notice.dart';
 import 'lan_controller.dart';
 import 'local_store.dart';
 import 'remote_widgets.dart';
@@ -43,15 +44,21 @@ Future<T?> _lanPanel<T>(
     constraints: const BoxConstraints(maxWidth: 720),
     builder: (context) {
       final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+      final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
+      final paddingBottom = MediaQuery.paddingOf(context).bottom;
+      final systemInset = viewPaddingBottom > paddingBottom
+          ? viewPaddingBottom
+          : paddingBottom;
       final available = max(
         0.0,
         MediaQuery.sizeOf(context).height -
             keyboard -
+            systemInset -
             MediaQuery.paddingOf(context).top -
             24,
       );
       return Padding(
-        padding: EdgeInsets.only(bottom: keyboard),
+        padding: EdgeInsets.only(bottom: keyboard + systemInset),
         child: SizedBox(height: min(height, available), child: child),
       );
     },
@@ -73,9 +80,7 @@ Future<LanConnection?> chooseLanDevice(
 void openLanSync(BuildContext context) {
   final controller = LanController.current;
   if (controller == null) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('设备互联尚未就绪')));
+    AppNotice.show(context, '设备互联尚未就绪');
     return;
   }
   Navigator.push(

@@ -25,11 +25,17 @@ class FixtureRepository extends AppRepository {
   @override
   Future<void> initialize() async {}
   @override
+  Future<CatalogPage> searchProgress(String source, String query) async =>
+      CatalogPage([]);
+  @override
   Future<CatalogPage> cached(String source, {String category = ''}) async =>
       cachedPages[source] ?? CatalogPage([]);
   @override
-  Future<String> cover(Drama drama, {bool force = false}) async =>
-      throw AppFailure('合成剧集没有远程海报');
+  Future<String> cover(
+    Drama drama, {
+    bool force = false,
+    bool refresh = false,
+  }) async => throw AppFailure('合成剧集没有远程海报');
   @override
   Future<CatalogPage> catalog(
     String source, {

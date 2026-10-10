@@ -84,6 +84,7 @@ extension LocalStoreSync on LocalStore {
     Map<String, Object> values, {
     required Set<String> keys,
     Set<String> clearProgress = const {},
+    Map<String, WatchEntry>? historyOverride,
   }) {
     if (locked ||
         !keys.any(
@@ -102,9 +103,14 @@ extension LocalStoreSync on LocalStore {
       final drama = Drama.fromJson(row);
       favorites[drama.id] = drama;
     }
-    for (final row in readJsonList(values[_key('history')] as String?)) {
-      final watch = WatchEntry.fromJson(row);
-      history[watch.drama.id] = watch;
+    final provided = historyOverride;
+    if (provided == null) {
+      for (final row in readJsonList(values[_key('history')] as String?)) {
+        final watch = WatchEntry.fromJson(row);
+        history[watch.drama.id] = watch;
+      }
+    } else {
+      history.addAll(provided);
     }
     final rawStates = lanMap(
       jsonDecode(values[_key('followStates')] as String? ?? '{}'),

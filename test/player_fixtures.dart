@@ -11,6 +11,7 @@ class ScriptedPlayer extends PlatformPlayer {
   final played = <bool>[];
   bool disposed = false;
   final rates = <double>[];
+  int pauses = 0;
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
@@ -90,8 +91,14 @@ class ScriptedPlayer extends PlatformPlayer {
     );
   }
 
+  void setBuffering(bool value) {
+    state = state.copyWith(buffering: value);
+    bufferingController.add(value);
+  }
+
   @override
   Future<void> pause() async {
+    pauses++;
     state = state.copyWith(playing: false);
     playingController.add(false);
   }

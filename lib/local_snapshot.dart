@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_encoder.dart';
+
 class LocalSnapshot {
   LocalSnapshot(this.preferences) {
     reloadValues();
@@ -15,6 +17,7 @@ class LocalSnapshot {
     'followStates',
     'seriesCandidates',
     'mediaHistory',
+    'watchStats',
     'source',
     'hideVip',
     'playback',
@@ -30,18 +33,24 @@ class LocalSnapshot {
     'activeProfile',
     'displayMode',
     'themeMode',
+    'interfaceStyle',
     'autoExport',
     'exportPosters',
     'forceLogin',
+    'greenMode',
+    'fullMode',
+    'exportDirectory',
+    'storagePromptShown',
   };
   final SharedPreferences preferences;
+  final SnapshotEncoder encoder = SnapshotEncoder();
   Map<String, Object> _values = {};
 
   static bool owns(String key) =>
       globalKeys.contains(key) ||
       libraryKeys.contains(key) ||
       RegExp(
-        r'^profile\.[a-zA-Z0-9_-]{1,64}\.(history|favorites|followStates|seriesCandidates|mediaHistory|source|hideVip|playback|downloadPreferences|catalogView|recentSearches|lanRecords|lanSettings|lanReceipts)$',
+        r'^profile\.[a-zA-Z0-9_-]{1,64}\.(history|favorites|followStates|seriesCandidates|mediaHistory|watchStats|source|hideVip|playback|downloadPreferences|catalogView|recentSearches|lanRecords|lanSettings|lanReceipts)$',
       ).hasMatch(key);
 
   Map<String, Object> get values => Map.of(_values);
@@ -77,6 +86,9 @@ class LocalSnapshot {
         'autoExport',
         'exportPosters',
         'forceLogin',
+        'greenMode',
+        'fullMode',
+        'storagePromptShown',
       }.contains(entry.key.split('.').last);
       if (!owns(entry.key) ||
           (boolean ? entry.value is! bool : entry.value is! String)) {
@@ -97,7 +109,7 @@ class LocalSnapshot {
 
   Future<void> commit(Map<String, Object> values) async {
     if (values.keys.any((key) => !owns(key))) throw StateError('无效的本地配置字段');
-    final content = jsonEncode({'version': 1, 'values': values});
+    final content = await encoder.encode(values);
     if (utf8.encode(content).length > 16 * 1024 * 1024) {
       throw StateError('本地记录超过保存上限，请先导出备份并清理记录');
     }

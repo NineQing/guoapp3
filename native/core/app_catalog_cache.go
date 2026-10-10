@@ -81,6 +81,10 @@ func migrateNativeDrama(drama nativeDrama) nativeDrama {
 	if drama.MetadataSchema == 0 && drama.Source == sourceHuangdou && drama.VIP != nil && !*drama.VIP {
 		drama.VIP = nil
 	}
+	if strings.Contains(strings.ToLower(drama.Cover), "huangguoai.com") {
+		drama.Cover = ""
+	}
+	drama = migrateDuanjuPayloadKey(drama)
 	drama.MetadataSchema = 1
 	return drama
 }
@@ -142,7 +146,9 @@ func mergeNativeDrama(previous, fresh nativeDrama) nativeDrama {
 	if fresh.Description == "" {
 		fresh.Description = previous.Description
 	}
-	if fresh.Cover == "" {
+	// 海报一经写入就固定下来：详情页与目录刷新解析到的封面可能来自
+	// 页面上的其他剧集（相关推荐、猜你喜欢），只在原本没有海报时补齐。
+	if fresh.Cover == "" || previous.Cover != "" {
 		fresh.Cover = previous.Cover
 	}
 	if fresh.Category == "" || nativeGenericCategory(fresh.Category) && previous.Category != "" && !nativeGenericCategory(previous.Category) {
@@ -245,6 +251,10 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 }
 
 func (engine *nativeEngine) writeCatalogDiskLocked() error {
+	if engine.deferCatalogSave {
+		engine.markCatalogSavePendingLocked()
+		return nil
+	}
 	body, err := json.Marshal(nativeCatalogDisk{Version: 3, Catalogs: engine.catalogs, States: engine.catalogStates, Categories: engine.categoryOptions, HongguoApp: engine.hongguoCatalog, Recommendations: engine.recommendations})
 	if err == nil && len(body) > nativeCatalogMaxBytes {
 		err = errNativeCatalogLimit

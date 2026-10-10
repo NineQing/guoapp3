@@ -11,12 +11,18 @@ import 'app_theme.dart';
 import 'app_layout.dart';
 import 'background_downloads.dart';
 import 'local_store.dart';
+import 'playback_preferences.dart';
+import 'playback_settings_screen.dart';
 import 'profiles_screen.dart';
 import 'remote_widgets.dart';
 import 'sources_screen.dart';
+import 'storage_access.dart';
 import 'widgets.dart';
 import 'resource_settings_screen.dart';
 import 'lan_screen.dart';
+import 'library_transfer_actions.dart';
+import 'watch_stats.dart';
+import 'follow_state.dart';
 
 String storageSize(int bytes) {
   if (bytes < 0) return '暂不可用';
@@ -32,25 +38,37 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.store,
+    this.onLibraryChanged,
   });
   final AppRepository repository;
   final LocalStore store;
+  final ValueChanged<Iterable<String>>? onLibraryChanged;
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
-
-typedef _TelevisionEntry = ({
-  String id,
-  IconData icon,
-  String title,
-  String subtitle,
-  VoidCallback? onPressed,
-});
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _listKey = GlobalKey<RemoteListState>();
   bool _busy = false;
   String? _message;
+
+  /// 列表底部避让系统手势条 / 导航栏，避免最后一项被遮挡。
+  static double _systemInset(BuildContext context) {
+    final viewPadding = MediaQuery.viewPaddingOf(context).bottom;
+    final padding = MediaQuery.paddingOf(context).bottom;
+    return viewPadding > padding ? viewPadding : padding;
+  }
+
+  Future<void> _showWatchStats() => WatchStatsPanel.show(
+    context,
+    stats: widget.store.watchStats,
+    watchingCount: widget.store.favorites
+        .where(
+          (drama) =>
+              widget.store.following(drama.id)?.status == FollowStatus.watching,
+        )
+        .length,
+  );
 
   Future<void> _chooseTheme() async {
     if (AppLayout.isTelevision(context)) {
@@ -104,6 +122,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (selected != null && mounted) {
       await saveUserChange(context, () => widget.store.setThemeMode(selected));
+    }
+  }
+
+  Future<void> _chooseInterfaceStyle() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('界面风格'),
+        children: [
+          RadioGroup<String>(
+            groupValue: widget.store.interfaceStyle,
+            onChanged: (value) => Navigator.pop(context, value),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final style in ['standard', 'glass'])
+                  RadioListTile<String>(
+                    value: style,
+                    title: Text(style == 'glass' ? '玻璃' : '标准'),
+                    subtitle: Text(
+                      style == 'glass' ? '悬浮玻璃底栏、菜单与回到顶部按钮' : '经典底部导航',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (selected != null && mounted) {
+      await saveUserChange(
+        context,
+        () => widget.store.setInterfaceStyle(selected),
+      );
     }
   }
 
@@ -187,6 +239,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _libraryTransfer(bool restore) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final transfer = LibraryTransfer(widget.repository);
+      final outcome = restore
+          ? await transfer.importLibrary()
+          : await transfer.exportLibrary();
+      if (!mounted) return;
+      final sources = outcome.importedSources;
+      if (sources != null) {
+        widget.onLibraryChanged?.call(
+          sources.isEmpty
+              ? widget.store.sources.map((item) => item.id)
+              : sources,
+        );
+      }
+      setState(() => _message = outcome.message);
+    } catch (error) {
+      if (mounted) setState(() => _message = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _toggleAutoExport() async {
     try {
       if (!widget.store.autoExport) {
@@ -203,7 +282,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
     () => widget.store.setExportPosters(!widget.store.exportPosters),
   );
 
-  List<_TelevisionEntry> _televisionEntries() => [
+  Future<void> _toggleGreenMode() async {
+    if (widget.store.greenMode) {
+      const summary = '关闭后会展示成人点播与成人直播内容，站源管理与直播分类中将出现成人入口。';
+      final bool accepted;
+      if (AppLayout.isTelevision(context)) {
+        accepted =
+            await showDialog<String>(
+              context: context,
+              builder: (_) => TelevisionActionDialog(
+                title: '关闭绿色模式？',
+                options: [
+                  TelevisionAction(
+                    value: 'disable',
+                    label: '关闭绿色模式',
+                    description: summary,
+                    icon: Icons.visibility_off_outlined,
+                  ),
+                ],
+              ),
+            ) ==
+            'disable';
+      } else {
+        accepted =
+            await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('关闭绿色模式？'),
+                content: const Text(summary),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('关闭'),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+      }
+      if (!accepted || !mounted) return;
+    }
+    await saveUserChange(
+      context,
+      () => widget.store.setGreenMode(!widget.store.greenMode),
+    );
+  }
+
+  List<
+    ({
+      String id,
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback? onPressed,
+    })
+  >
+  _televisionEntries() => [
+    (
+      id: 'watch-stats',
+      icon: Icons.bar_chart_rounded,
+      title: '观看统计',
+      subtitle: '实际观看时长、看完集数与最近 7 天',
+      onPressed: _showWatchStats,
+    ),
     (
       id: 'lan',
       icon: Icons.devices_rounded,
@@ -246,6 +391,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     ),
+    if (widget.store.canDownload)
+      (
+        id: 'playback-preferences',
+        icon: Icons.play_circle_outline,
+        title: '播放设置',
+        subtitle: '长按倍速、默认倍速、连播、弹幕与清晰度',
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => PlaybackSettingsScreen(store: widget.store),
+          ),
+        ),
+      ),
     if (widget.store.canDownload)
       (
         id: 'download-preferences',
@@ -291,6 +449,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+      if (widget.store.fullMode)
+        (
+          id: 'green-mode',
+          icon: Icons.verified_user_outlined,
+          title: '分级限制',
+          subtitle: widget.store.greenMode
+              ? '已开启 · 不显示成人点播与成人直播'
+              : '已关闭 · 显示成人点播与成人直播',
+          onPressed: _busy ? null : _toggleGreenMode,
+        ),
       (
         id: 'auto-export',
         icon: Icons.movie_filter_outlined,
@@ -322,6 +490,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: '恢复配置备份',
         subtitle: '从备份文件恢复用户与设置',
         onPressed: _busy ? null : () => _backup(true),
+      ),
+      (
+        id: 'library-export',
+        icon: Icons.menu_book_outlined,
+        title: '导出剧库',
+        subtitle: '与「果果剧库」互相导入，只含剧库条目',
+        onPressed: _busy ? null : () => _libraryTransfer(false),
+      ),
+      (
+        id: 'library-import',
+        icon: Icons.library_add_outlined,
+        title: '导入剧库',
+        subtitle: '按剧集 ID 合并补全，不删除本地条目',
+        onPressed: _busy ? null : () => _libraryTransfer(true),
       ),
     ],
   ];
@@ -356,7 +538,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 )
               : ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    16,
+                    16,
+                    16 + _systemInset(context),
+                  ),
                   children: [
                     ListTile(
                       key: const ValueKey('lan-settings'),
@@ -383,6 +570,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ListTile(
+                      key: const ValueKey('watch-stats-setting'),
+                      leading: const Icon(Icons.bar_chart_rounded),
+                      title: const Text('观看统计'),
+                      subtitle: const Text('实际观看时长、看完集数与最近 7 天'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: _showWatchStats,
+                    ),
+                    ListTile(
                       key: const ValueKey('theme-setting'),
                       leading: const Icon(Icons.palette_outlined),
                       title: const Text('外观主题'),
@@ -390,6 +585,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: _chooseTheme,
                     ),
+                    ListTile(
+                      key: const ValueKey('interface-style-setting'),
+                      leading: const Icon(Icons.blur_on_outlined),
+                      title: const Text('界面风格'),
+                      subtitle: Text(
+                        widget.store.interfaceStyle == 'glass'
+                            ? '玻璃 · 悬浮玻璃底栏、菜单与回到顶部按钮'
+                            : '标准 · 经典底部导航',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: _chooseInterfaceStyle,
+                    ),
+                    if (widget.store.fullMode)
+                      ListTile(
+                        key: const ValueKey('green-mode-setting'),
+                        leading: const Icon(Icons.verified_user_outlined),
+                        title: const Text('分级限制'),
+                        subtitle: Text(
+                          widget.store.greenMode
+                              ? '已开启 · 不显示成人点播与成人直播'
+                              : '已关闭 · 显示成人点播与成人直播',
+                        ),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: _busy ? null : _toggleGreenMode,
+                      ),
                     ListTile(
                       leading: const Icon(Icons.people_outline),
                       title: const Text('用户管理'),
@@ -401,6 +621,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
+                    if (widget.store.canDownload)
+                      ListTile(
+                        key: const ValueKey('playback-settings-entry'),
+                        leading: const Icon(Icons.play_circle_outline),
+                        title: const Text('播放设置'),
+                        subtitle: Text(
+                          '长按倍速 ${speedLabel(widget.store.playbackPreferences.holdSpeed)}x · '
+                          '滑动快进 ${widget.store.playbackPreferences.swipeSeekSeconds} 秒',
+                        ),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                PlaybackSettingsScreen(store: widget.store),
+                          ),
+                        ),
+                      ),
                     if (widget.store.canDownload)
                       ListTile(
                         leading: const Icon(Icons.download_outlined),
@@ -491,6 +729,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         title: const Text('恢复配置备份'),
                         onTap: _busy ? null : () => _backup(true),
                       ),
+                      ListTile(
+                        leading: const Icon(Icons.menu_book_outlined),
+                        title: const Text('导出剧库'),
+                        subtitle: const Text('与「果果剧库」互相导入，只含剧库条目'),
+                        onTap: _busy ? null : () => _libraryTransfer(false),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.library_add_outlined),
+                        title: const Text('导入剧库'),
+                        subtitle: const Text('按剧集 ID 合并补全，不删除本地条目'),
+                        onTap: _busy ? null : () => _libraryTransfer(true),
+                      ),
                     ],
                     if (Platform.isIOS)
                       const Padding(
@@ -523,14 +773,34 @@ class StorageScreen extends StatefulWidget {
   State<StorageScreen> createState() => _StorageScreenState();
 }
 
-class _StorageScreenState extends State<StorageScreen> {
+class _StorageScreenState extends State<StorageScreen>
+    with WidgetsBindingObserver {
   Map<String, dynamic>? _info;
   String? _error;
   bool _busy = false;
+  bool _access = true;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
+    _loadAccess();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadAccess();
+  }
+
+  Future<void> _loadAccess() async {
+    final access = await hasAllFilesAccess();
+    if (mounted && access != _access) setState(() => _access = access);
   }
 
   Future<void> _refresh() async {
@@ -615,6 +885,20 @@ class _StorageScreenState extends State<StorageScreen> {
     }
   }
 
+  Future<void> _pickExportDirectory() async {
+    if (_busy) return;
+    final directory = await FilePicker.getDirectoryPath(dialogTitle: '选择导出目录');
+    if (directory == null || !mounted) return;
+    try {
+      await widget.store.setExportDirectory(directory);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (mounted) setState(() {});
+    if (!await hasAllFilesAccess()) await ensureStorageAccess(context);
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy,
@@ -660,6 +944,35 @@ class _StorageScreenState extends State<StorageScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Text(_error!),
                 ),
+              const Divider(height: 40),
+              ListTile(
+                title: const Text('导出目录'),
+                subtitle: Text(
+                  widget.store.exportDirectory.isEmpty
+                      ? '未设置 · 导出时选择并记住'
+                      : widget.store.exportDirectory,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _busy ? null : _pickExportDirectory,
+              ),
+              if (Platform.isAndroid) ...[
+                const Divider(),
+                ListTile(
+                  title: const Text('所有文件访问权限'),
+                  subtitle: Text(
+                    _access ? '已授权 · 可导出到应用目录外的文件夹' : '未授权 · 导出到应用目录外需要授权',
+                  ),
+                  trailing: _access
+                      ? const Icon(Icons.verified_outlined)
+                      : const Text('去授权'),
+                  onTap: _access
+                      ? null
+                      : () async {
+                          await ensureStorageAccess(context);
+                          await _loadAccess();
+                        },
+                ),
+              ],
               if (widget.store.profile.admin)
                 FilledButton.icon(
                   onPressed: _busy ? null : _move,

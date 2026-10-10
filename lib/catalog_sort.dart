@@ -75,6 +75,28 @@ bool matchesDramaQuery(Drama drama, String query) {
   return terms.every(fields.contains);
 }
 
+String searchKeyword(String title) {
+  var value = title.trim();
+  if (value.isEmpty) return '';
+  value = value.replaceAll(RegExp(r'[（(\[【][^）)\]】]*[）)\]】]'), '');
+  value = value.replaceAll(
+    RegExp(
+      r'(?:第\s*[0-9零〇一二两兩三四五六七八九十百千]+\s*[季部篇]|'
+      r'[0-9零〇一二两兩三四五六七八九十百千]+\s*[季部篇]|'
+      r'season\s*\d+|s\d+|'
+      r'(?:全|共)\s*[0-9零〇一二两兩三四五六七八九十百千]+\s*集|'
+      r'[0-9]+\s*集全?|'
+      r'[（(]?(?:完结|全集|大结局|抢先版|预告|花絮|合集|短剧|高清|超清|蓝光|4k|1080p|720p)[）)]?)',
+      caseSensitive: false,
+    ),
+    '',
+  );
+  value = value.replaceAll(RegExp(r'[\s\u3000·\-—_~～|/\\]+'), ' ');
+  value = value.replaceAll(RegExp(r'^[\s·\-—_~～|/\\]+'), '');
+  value = value.replaceAll(RegExp(r'[\s·\-—_~～|/\\]+$'), '');
+  return value.trim();
+}
+
 double? catalogMetric(String text) {
   final cleaned = text.toLowerCase().replaceAll(RegExp(r'[,，\s]'), '');
   final match = RegExp(
@@ -133,16 +155,18 @@ String _naturalTitle(String title) =>
       (match) => '第${_seasonNumber(match[1]!)}${match[2]}',
     );
 
+List<String> _naturalTitleParts(String title) {
+  final matches = RegExp(r'\d+|\D+').allMatches(_naturalTitle(title));
+  return matches.map((match) => match[0]!).toList();
+}
+
 int naturalTitleCompare(String left, String right) {
-  final pattern = RegExp(r'\d+|\D+');
-  final a = pattern
-      .allMatches(_naturalTitle(left))
-      .map((match) => match[0]!)
-      .toList();
-  final b = pattern
-      .allMatches(_naturalTitle(right))
-      .map((match) => match[0]!)
-      .toList();
+  final a = _naturalTitleParts(left);
+  final b = _naturalTitleParts(right);
+  return _compareNaturalParts(a, b);
+}
+
+int _compareNaturalParts(List<String> a, List<String> b) {
   for (var index = 0; index < a.length && index < b.length; index++) {
     final numberA = int.tryParse(a[index]);
     final numberB = int.tryParse(b[index]);
@@ -183,13 +207,20 @@ List<Drama> sortCatalog(Iterable<Drama> rows, CatalogView view) {
         _ => null,
       },
   };
+  final names = <Drama, String>{};
+  final seasons = <Drama, List<String>>{};
+  for (final drama in items) {
+    if (view.sort == CatalogSort.name) {
+      names[drama] = normalizedSearchText(drama.title);
+    } else if (view.sort == CatalogSort.season) {
+      seasons[drama] = _naturalTitleParts(drama.title);
+    }
+  }
   items.sort((a, b) {
     final comparison = switch (view.sort) {
       CatalogSort.source => 0,
-      CatalogSort.name => normalizedSearchText(
-        a.title,
-      ).compareTo(normalizedSearchText(b.title)),
-      CatalogSort.season => naturalTitleCompare(a.title, b.title),
+      CatalogSort.name => names[a]!.compareTo(names[b]!),
+      CatalogSort.season => _compareNaturalParts(seasons[a]!, seasons[b]!),
       _ => _descending(metrics[a.id], metrics[b.id]),
     };
     return comparison != 0

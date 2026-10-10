@@ -1,3 +1,5 @@
+import 'player_route.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -6,7 +8,9 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
+import 'app_notice.dart';
 import 'core_bridge.dart';
+import 'cross_source_search.dart';
 import 'download_picker.dart';
 import 'downloads_screen.dart';
 import 'local_store.dart';
@@ -63,6 +67,7 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _profileEpoch = widget.store.profileEpoch;
     widget.store.addListener(_onStoreChanged);
+    widget.store.libraryChanges.addListener(_onStoreChanged);
     _load();
   }
 
@@ -71,7 +76,9 @@ class _DetailScreenState extends State<DetailScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != widget.store) {
       oldWidget.store.removeListener(_onStoreChanged);
+      oldWidget.store.libraryChanges.removeListener(_onStoreChanged);
       widget.store.addListener(_onStoreChanged);
+      widget.store.libraryChanges.addListener(_onStoreChanged);
     }
   }
 
@@ -80,6 +87,7 @@ class _DetailScreenState extends State<DetailScreen> {
     _detailScroll.dispose();
     _playFocus.dispose();
     widget.store.removeListener(_onStoreChanged);
+    widget.store.libraryChanges.removeListener(_onStoreChanged);
     _generation++;
     super.dispose();
   }
@@ -204,29 +212,24 @@ class _DetailScreenState extends State<DetailScreen> {
         quality: selection.quality,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(added == 0 ? '所选集数已在下载列表中' : '已加入 $added 集，已有任务自动跳过'),
-          action: SnackBarAction(
-            label: '查看',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => DownloadsScreen(
-                    repository: widget.repository,
-                    store: widget.store,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
+      AppNotice.showAction(
+        context,
+        added == 0 ? '所选集数已在下载列表中' : '已加入 $added 集，已有任务自动跳过',
+        actionLabel: '查看',
+        onAction: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => DownloadsScreen(
+                repository: widget.repository,
+                store: widget.store,
+              ),
+            ),
+          );
+        },
       );
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        AppNotice.show(context, error.toString());
       }
     }
   }
@@ -275,8 +278,8 @@ class _DetailScreenState extends State<DetailScreen> {
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PlayerScreen(
+      playerRoute(
+        PlayerScreen(
           detail: detail,
           initialIndex: index,
           initialPosition: position,
@@ -341,6 +344,18 @@ class _DetailScreenState extends State<DetailScreen> {
               loading: _loading,
               tooltip: '更新剧集信息',
               onPressed: allowed ? _load : null,
+            ),
+            IconButton(
+              tooltip: '在其他站源中搜索',
+              onPressed: allowed
+                  ? () => showCrossSourceSearch(
+                      context,
+                      drama: widget.drama,
+                      repository: widget.repository,
+                      store: widget.store,
+                    )
+                  : null,
+              icon: const Icon(Icons.travel_explore_rounded),
             ),
           ],
         ),
@@ -551,7 +566,22 @@ class _DetailScreenState extends State<DetailScreen> {
       title: _error != null ? '剧集信息暂时不可用' : '暂时没有可播放的集数',
       message: _error ?? '可以更新剧集信息后重试。',
       onRetry: _load,
-      secondaryAction: _sourceDiagnostics,
+      secondaryAction: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton.icon(
+            onPressed: () => showCrossSourceSearch(
+              context,
+              drama: widget.drama,
+              repository: widget.repository,
+              store: widget.store,
+            ),
+            icon: const Icon(Icons.travel_explore_rounded),
+            label: const Text('其他站源'),
+          ),
+          ?_sourceDiagnostics,
+        ],
+      ),
     );
   }
 

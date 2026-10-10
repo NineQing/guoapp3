@@ -19,8 +19,17 @@ type providerMediaCredentials struct {
 
 type providerMediaCredentialsKey struct{}
 
+const providerMediaCredentialReserve = 2 * time.Minute
+
 func providerMediaContext(ctx context.Context, credentials *providerMediaCredentials) context.Context {
 	return context.WithValue(ctx, providerMediaCredentialsKey{}, credentials)
+}
+
+func validProviderMediaCredentials(credentials *providerMediaCredentials, reserve time.Duration) bool {
+	if credentials == nil || credentials.expires.IsZero() {
+		return true
+	}
+	return time.Now().Add(reserve).Before(credentials.expires)
 }
 
 func providerMediaOrigin(address *url.URL) string {
@@ -47,7 +56,7 @@ func (credentials *providerMediaCredentials) apply(request *http.Request) error 
 		}
 	}
 	if providerMediaOrigin(request.URL) == credentials.origin {
-		if !credentials.expires.IsZero() && !time.Now().Before(credentials.expires) {
+		if !validProviderMediaCredentials(credentials, 0) {
 			return errors.New("播放凭证已过期，请重新解析播放")
 		}
 		request.Header.Set("Cookie", credentials.cookie)

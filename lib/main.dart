@@ -12,17 +12,24 @@ import 'core_bridge.dart';
 import 'app_layout.dart';
 import 'app_orientation.dart';
 import 'app_theme.dart';
+import 'error_boundary.dart';
 import 'home_screen.dart';
+import 'launcher_icon.dart';
 import 'local_store.dart';
 import 'profiles_screen.dart';
 import 'media_library.dart';
 import 'package_smoke.dart';
 import 'lan_controller.dart';
+import 'player_route.dart';
+import 'recommendation_service.dart';
 import 'player_screen.dart';
+import 'search_cache.dart';
+import 'storage_access.dart';
 import 'video_enhancement_assets.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  installErrorWidget();
   if (Platform.isAndroid) {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
@@ -62,6 +69,8 @@ class _AppBootstrapState extends State<AppBootstrap>
     LanController.current = null;
     MediaLibrary.current?.dispose();
     MediaLibrary.current = null;
+    RecommendationService.current?.dispose();
+    RecommendationService.current = null;
     store?.dispose();
     super.dispose();
   }
@@ -112,8 +121,12 @@ class _AppBootstrapState extends State<AppBootstrap>
     });
     try {
       final preferences = await SharedPreferences.getInstance();
+      await SearchResultCache.instance.initialize(preferences);
+      RecommendationService.current?.dispose();
+      RecommendationService.current = RecommendationService(preferences);
       await _refreshDevice();
       await repository.initialize();
+      await LauncherIcon.apply(LocalStore(preferences).fullMode);
       if (mounted) {
         setState(() {
           store = LocalStore(preferences);
@@ -152,8 +165,8 @@ class _AppBootstrapState extends State<AppBootstrap>
             if (navigation == null) throw StateError('接收设备界面尚未就绪');
             unawaited(
               navigation.pushAndRemoveUntil<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen(
+                playerRoute(
+                  PlayerScreen(
                     detail: request.detail,
                     initialIndex: request.index,
                     initialPosition: request.position,
@@ -167,6 +180,7 @@ class _AppBootstrapState extends State<AppBootstrap>
             );
           };
         });
+        if (Platform.isAndroid) unawaited(_promptStorageAccess(store!));
       }
     } catch (failure) {
       if (mounted) {
@@ -175,6 +189,24 @@ class _AppBootstrapState extends State<AppBootstrap>
         });
       }
     }
+  }
+
+  Future<void> _promptStorageAccess(LocalStore store) async {
+    if (store.locked || store.storagePromptShown) return;
+    final granted = await hasAllFilesAccess();
+    if (!mounted) return;
+    try {
+      await store.setStoragePromptShown(true);
+    } catch (_) {}
+    if (granted) return;
+    var context = navigator.currentState?.overlay?.context;
+    if (context == null) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      context = navigator.currentState?.overlay?.context;
+      if (context == null) return;
+    }
+    await ensureStorageAccess(context);
   }
 
   @override
@@ -216,7 +248,7 @@ class DuanjuApp extends StatelessWidget {
 
   Widget _application() => MaterialApp(
     navigatorKey: navigatorKey,
-    title: appName,
+    title: appEditionName(store?.fullMode ?? false),
     debugShowCheckedModeBanner: false,
     locale: const Locale('zh', 'CN'),
     supportedLocales: const [Locale('zh', 'CN')],
@@ -261,7 +293,11 @@ class DuanjuApp extends StatelessWidget {
     },
     home: store != null
         ? store!.locked
-              ? ProfilesScreen(store: store!, locked: true)
+              ? ProfilesScreen(
+                  store: store!,
+                  locked: true,
+                  repository: repository,
+                )
               : HomeScreen(
                   key: ValueKey(
                     'profile-${store!.profile.id}-${store!.profileEpoch}',
@@ -283,7 +319,7 @@ class DuanjuApp extends StatelessWidget {
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      bootstrapError ?? '正在打开$appName',
+                      bootstrapError ?? '正在打开${appEditionName(false)}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 18),
                     ),

@@ -1,7 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
+import 'app_notice.dart';
 import 'catalog_sort.dart';
 import 'core_bridge.dart';
 import 'drama_actions.dart';
@@ -17,6 +19,7 @@ class SavedLibrary extends StatefulWidget {
     required this.repository,
     required this.store,
     required this.history,
+    this.historyToggle = false,
     required this.onOpen,
     required this.onContinue,
     this.onDownload,
@@ -28,6 +31,9 @@ class SavedLibrary extends StatefulWidget {
   final AppRepository repository;
   final LocalStore store;
   final bool history;
+
+  /// 追剧页签内是否提供「追剧 / 历史」分段切换。
+  final bool historyToggle;
   final ValueChanged<Drama> onOpen;
   final ValueChanged<Drama> onContinue;
   final ValueChanged<Drama>? onDownload;
@@ -41,90 +47,38 @@ class SavedLibrary extends StatefulWidget {
 
 class _SavedLibraryState extends State<SavedLibrary> {
   final _search = TextEditingController();
-  final _tvDeleteFocus = FocusNode();
   String _filter = '';
-  bool _selecting = false;
-  final _selectedIds = <String>{};
+  late bool _history = widget.history;
+
+  bool get _toggle => widget.historyToggle;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.store.libraryChanges.addListener(_libraryChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant SavedLibrary oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.libraryChanges.removeListener(_libraryChanged);
+      widget.store.libraryChanges.addListener(_libraryChanged);
+    }
+    if (oldWidget.history != widget.history && !_toggle) {
+      _history = widget.history;
+    }
+  }
 
   @override
   void dispose() {
+    widget.store.libraryChanges.removeListener(_libraryChanged);
     _search.dispose();
-    _tvDeleteFocus.dispose();
     super.dispose();
   }
 
-  void _enterSelection([String? initialId]) {
-    setState(() {
-      _selecting = true;
-      if (initialId != null) {
-        _selectedIds.add(initialId);
-      }
-    });
-  }
-
-  void _exitSelection() {
-    setState(() {
-      _selecting = false;
-      _selectedIds.clear();
-    });
-  }
-
-  void _toggleSelection(String id) {
-    setState(() {
-      if (!_selectedIds.remove(id)) {
-        _selectedIds.add(id);
-      }
-    });
-  }
-
-  void _toggleSelectAll(List<Drama> visibleItems) {
-    setState(() {
-      final visibleIds = visibleItems.map((d) => d.id).toSet();
-      if (_selectedIds.containsAll(visibleIds)) {
-        _selectedIds.removeAll(visibleIds);
-      } else {
-        _selectedIds.addAll(visibleIds);
-      }
-    });
-  }
-
-  Future<void> _deleteSelected() async {
-    if (_selectedIds.isEmpty) return;
-    final count = _selectedIds.length;
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('删除 $count 条观看记录？'),
-        content: Text('这会删除已勾选的 $count 部短剧观看记录，追剧状态不受影响。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (accepted == true && mounted) {
-      final toRemove = _selectedIds.toList();
-      await saveUserChange(
-        context,
-        () => widget.store.removeHistories(toRemove),
-      );
-      if (mounted) {
-        setState(() {
-          _selectedIds.clear();
-          _selecting = false;
-        });
-      }
-    }
+  void _libraryChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _clearHistory() async {
@@ -151,16 +105,28 @@ class _SavedLibraryState extends State<SavedLibrary> {
     }
   }
 
-  void _actions(Drama drama) => showDramaActions(
+  Future<void> _refreshCover(Drama drama) async {
+    try {
+      await widget.repository.cover(drama, force: true, refresh: true);
+      if (mounted) AppNotice.show(context, '海报已重新获取');
+    } on AppFailure catch (error) {
+      if (mounted) AppNotice.show(context, error.message);
+    } catch (error) {
+      if (mounted) AppNotice.show(context, '$error');
+    }
+  }
+
+  void _actions(Drama drama, {Rect? anchor}) => showDramaActions(
     context,
     drama: drama,
     store: widget.store,
+    anchor: anchor,
     history: widget.history,
     onContinue: () => widget.onContinue(drama),
     onDownload: widget.onDownload == null
         ? null
         : () => widget.onDownload!(drama),
-    onSelectHistory: widget.history ? () => _enterSelection(drama.id) : null,
+    onRefreshCover: () => unawaited(_refreshCover(drama)),
   );
 
   Widget _tile(Drama drama, {FocusNode? focusNode, VoidCallback? onFocus}) {
@@ -169,124 +135,22 @@ class _SavedLibraryState extends State<SavedLibrary> {
     final badge = state == null
         ? null
         : '${state.label}${state.hasUpdates ? ' · ${state.updateLabel}' : ''}';
-    final isSelecting = widget.history && _selecting;
-    final isSelected = isSelecting ? _selectedIds.contains(drama.id) : null;
-    final onTileTap = isSelecting
-        ? () => _toggleSelection(drama.id)
-        : () => widget.onOpen(drama);
-    final onLongPress = widget.history && !_selecting
-        ? () => _enterSelection(drama.id)
-        : null;
-    final actionButton = isSelecting
-        ? null
-        : DramaActionButton(drama: drama, onPressed: () => _actions(drama));
     return DramaTile(
       key: ValueKey('saved-${drama.id}'),
       drama: drama,
       repository: widget.repository,
       focusNode: focusNode,
       onFocus: onFocus,
-      selected: isSelected,
-      onTap: onTileTap,
-      onMore: isSelecting ? null : () => _actions(drama),
-      onLongPress: onLongPress,
-      actions: actionButton,
+      onTap: () => widget.onOpen(drama),
+      onMore: () => _actions(drama),
+      actions: DramaActionButton(
+        drama: drama,
+        onPressed: (anchor) => _actions(drama, anchor: anchor),
+      ),
       badge: badge,
       subtitle: watched == null
           ? SourceSite.byId(drama.source).name
           : '第 ${watched.episode} 集 · ${formatPosition(watched.position)}',
-    );
-  }
-
-  Widget _selectionBar() {
-    final theme = Theme.of(context);
-    final count = _selectedIds.length;
-    return Material(
-      color: theme.colorScheme.surface,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: theme.colorScheme.outlineVariant),
-          ),
-        ),
-        child: SafeArea(
-          top: false,
-          bottom: false,
-          minimum: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      count == 0 ? '点选要删除的短剧' : '已选择 $count 部',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '可批量清理观看记录',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton.icon(
-                key: const ValueKey('delete-selected-history'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.error,
-                  foregroundColor: theme.colorScheme.onError,
-                ),
-                onPressed: count > 0 ? _deleteSelected : null,
-                icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                label: Text(count == 0 ? '删除' : '删除 ($count)'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _tvSelectionBar() {
-    final count = _selectedIds.length;
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Text(
-                '已选择 $count 部观看记录',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const Spacer(),
-              RemoteButton(
-                key: const ValueKey('tv-delete-selected-history'),
-                label: count == 0 ? '删除' : '删除 ($count)',
-                icon: Icons.delete_outline_rounded,
-                focusNode: _tvDeleteFocus,
-                onPressed: count > 0 ? _deleteSelected : null,
-              ),
-              const SizedBox(width: 8),
-              RemoteButton(
-                key: const ValueKey('tv-cancel-history-selection'),
-                label: '退出多选',
-                icon: Icons.close_rounded,
-                onPressed: _exitSelection,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -295,90 +159,82 @@ class _SavedLibraryState extends State<SavedLibrary> {
     animation: widget.store,
     builder: (context, _) {
       final history = widget.store.history;
-      final all = widget.history
+      final all = _history
           ? history.map((entry) => entry.drama).toList()
           : widget.store.favorites;
       final items = all.where((drama) {
         if (!matchesDramaQuery(drama, _search.text)) return false;
         final state = widget.store.following(drama.id);
-        return widget.history ||
+        return _history ||
             _filter.isEmpty ||
             (_filter == 'updates'
                 ? state?.hasUpdates == true
                 : state?.status.name == _filter);
       }).toList();
       final ids = items.map((drama) => drama.id).toSet();
-      final inSelection = widget.history && _selecting;
-      final title = inSelection
-          ? '已选择 ${_selectedIds.length} 项'
-          : '${widget.history ? '最近观看' : '我的追剧'} · ${all.length}';
-      final allSelected =
-          items.isNotEmpty && _selectedIds.containsAll(items.map((e) => e.id));
-      final tvExitDown = inSelection
-          ? () => _tvDeleteFocus.requestFocus()
-          : null;
-      final resume = inSelection
-          ? null
-          : history
-                .where(
-                  (entry) =>
-                      ids.contains(entry.drama.id) &&
-                      (!entry.finished ||
-                          entry.drama.episodes <= 0 ||
-                          entry.episode < entry.drama.episodes),
-                )
-                .firstOrNull;
+      final resume = history
+          .where(
+            (entry) =>
+                ids.contains(entry.drama.id) &&
+                (!entry.finished ||
+                    entry.drama.episodes <= 0 ||
+                    entry.episode < entry.drama.episodes),
+          )
+          .firstOrNull;
       final header = [
+        if (_toggle)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SegmentedButton<bool>(
+              key: const ValueKey('saved-mode'),
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.bookmark_border_rounded, size: 18),
+                  label: Text('追剧'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.history_rounded, size: 18),
+                  label: Text('历史'),
+                ),
+              ],
+              showSelectedIcon: false,
+              selected: {_history},
+              onSelectionChanged: (value) => setState(() {
+                _history = value.first;
+                _filter = '';
+              }),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
           child: Row(
             children: [
               Expanded(
                 child: Text(
-                  title,
+                  '${_history ? '历史' : '我的追剧'} · ${all.length}',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
-              if (inSelection) ...[
-                TextButton(
-                  key: const ValueKey('history-select-all'),
-                  onPressed: items.isEmpty
-                      ? null
-                      : () => _toggleSelectAll(items),
-                  child: Text(allSelected ? '取消全选' : '全选'),
-                ),
-                TextButton(
-                  key: const ValueKey('history-cancel-selection'),
-                  onPressed: _exitSelection,
-                  child: const Text('取消'),
-                ),
-              ] else if (widget.history && all.isNotEmpty) ...[
-                IconButton(
-                  key: const ValueKey('select-history'),
-                  tooltip: '批量删除',
-                  onPressed: () => _enterSelection(),
-                  icon: const Icon(Icons.checklist_rounded),
-                ),
+              if (_history && all.isNotEmpty)
                 IconButton(
                   tooltip: '清空观看记录',
                   onPressed: _clearHistory,
                   icon: const Icon(Icons.delete_outline_rounded),
                 ),
-              ],
             ],
           ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: TextField(
-            key: ValueKey(
-              widget.history ? 'history-search' : 'favorites-search',
-            ),
+            key: ValueKey(_history ? 'history-search' : 'favorites-search'),
             controller: _search,
             onChanged: (_) => setState(() {}),
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: widget.history ? '搜索观看记录' : '搜索追剧',
+              hintText: _history ? '搜索观看记录' : '搜索追剧',
               prefixIcon: const Icon(Icons.search_rounded),
               suffixIcon: _search.text.isEmpty
                   ? null
@@ -390,7 +246,7 @@ class _SavedLibraryState extends State<SavedLibrary> {
             ),
           ),
         ),
-        if (!widget.history)
+        if (!_history)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -437,16 +293,14 @@ class _SavedLibraryState extends State<SavedLibrary> {
       ];
       final empty = StatusPanel(
         title: all.isEmpty
-            ? widget.history
+            ? _history
                   ? '还没有观看记录'
                   : '还没有追剧'
             : '没有匹配的记录',
         message: all.isEmpty ? '去发现页，挑一部喜欢的短剧。' : '可以更换搜索词或筛选条件。',
-        icon: widget.history
-            ? Icons.history_rounded
-            : Icons.bookmark_border_rounded,
+        icon: _history ? Icons.history_rounded : Icons.bookmark_border_rounded,
       );
-      final content = LayoutBuilder(
+      return LayoutBuilder(
         builder: (context, constraints) {
           if (AppLayout.isTelevision(context)) {
             final columns = ((constraints.maxWidth - 36) / 150).floor().clamp(
@@ -468,7 +322,7 @@ class _SavedLibraryState extends State<SavedLibrary> {
                       ? empty
                       : RemoteGrid(
                           key: ValueKey(
-                            'saved-tv-${widget.history}-$_filter-${_search.text}',
+                            'saved-tv-$_history-$_filter-${_search.text}',
                           ),
                           itemKeys: items.map((item) => item.id).toList(),
                           columns: columns,
@@ -477,7 +331,6 @@ class _SavedLibraryState extends State<SavedLibrary> {
                           autofocus: widget.remoteAutofocus,
                           onExitLeft: widget.onExitLeft,
                           onExitUp: widget.onExitUp,
-                          onExitDown: tvExitDown,
                           itemBuilder: (_, index, node, onFocus) => _tile(
                             items[index],
                             focusNode: node,
@@ -490,9 +343,7 @@ class _SavedLibraryState extends State<SavedLibrary> {
           }
           final padding = constraints.maxWidth < 600 ? 16.0 : 24.0;
           return CustomScrollView(
-            key: PageStorageKey(
-              'saved-${widget.history}-$_filter-${_search.text}',
-            ),
+            key: PageStorageKey('saved-$_history-$_filter-${_search.text}'),
             slivers: [
               SliverToBoxAdapter(child: Column(children: header)),
               if (items.isEmpty)
@@ -514,28 +365,6 @@ class _SavedLibraryState extends State<SavedLibrary> {
             ],
           );
         },
-      );
-      if (!inSelection) return content;
-      final bottomBar = AppLayout.isTelevision(context)
-          ? _tvSelectionBar()
-          : _selectionBar();
-      final body = Column(
-        children: [
-          Expanded(child: content),
-          bottomBar,
-        ],
-      );
-      return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _exitSelection();
-        },
-        child: CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.escape): _exitSelection,
-          },
-          child: body,
-        ),
       );
     },
   );

@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import 'app_layout.dart';
+import 'glass_panel.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
 
@@ -10,7 +11,8 @@ class CatalogFilters extends StatefulWidget {
   const CatalogFilters({
     super.key,
     required this.categories,
-    required this.category,
+    this.category = '',
+    this.selected,
     required this.onCategory,
     required this.onRetry,
     this.error,
@@ -23,6 +25,7 @@ class CatalogFilters extends StatefulWidget {
 
   final List<CatalogCategory> categories;
   final String category;
+  final Set<String>? selected;
   final String? error;
   final ValueChanged<String> onCategory;
   final VoidCallback onRetry;
@@ -38,6 +41,9 @@ class CatalogFilters extends StatefulWidget {
 
 class _CatalogFiltersState extends State<CatalogFilters> {
   final _anchors = <String, GlobalKey>{};
+
+  bool _isSelected(String id) =>
+      widget.selected?.contains(id) ?? id == widget.category;
 
   int get _selectedIndex {
     final index = widget.categories.indexWhere(
@@ -89,7 +95,7 @@ class _CatalogFiltersState extends State<CatalogFilters> {
                         child: RemoteButton(
                           key: ValueKey('category-${entry.id}'),
                           label: entry.name,
-                          selected: entry.id == widget.category,
+                          selected: _isSelected(entry.id),
                           focusNode: node,
                           onFocus: onFocus,
                           onPressed: () => widget.onCategory(entry.id),
@@ -107,12 +113,15 @@ class _CatalogFiltersState extends State<CatalogFilters> {
                           Padding(
                             key: _anchors.putIfAbsent(entry.id, GlobalKey.new),
                             padding: const EdgeInsets.only(right: 6),
-                            child: ChoiceChip(
-                              key: ValueKey('category-${entry.id}'),
-                              label: Text(entry.name),
-                              selected: entry.id == widget.category,
-                              showCheckmark: false,
-                              onSelected: (_) => widget.onCategory(entry.id),
+                            child: PressScale(
+                              scale: .94,
+                              child: ChoiceChip(
+                                key: ValueKey('category-${entry.id}'),
+                                label: Text(entry.name),
+                                selected: _isSelected(entry.id),
+                                showCheckmark: false,
+                                onSelected: (_) => widget.onCategory(entry.id),
+                              ),
                             ),
                           ),
                       ],

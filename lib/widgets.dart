@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'core_bridge.dart';
 import 'app_layout.dart';
+import 'app_notice.dart';
+import 'core_bridge.dart';
+import 'glass_panel.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
 
@@ -16,9 +18,7 @@ Future<void> saveUserChange(
     await action();
   } catch (_) {
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('未能保存，请检查存储空间和权限后重试。')));
+      AppNotice.show(context, '未能保存，请检查存储空间和权限后重试。');
     }
   }
 }
@@ -203,6 +203,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   bool _retryOnFailure = false;
   bool _retryQueued = false;
   String? _failedPath;
+  String? _loadedPath;
 
   @override
   void initState() {
@@ -226,7 +227,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
         oldWidget.drama.cover != widget.drama.cover ||
         oldWidget.drama.source != widget.drama.source) {
       _coverFailed = _retryOnFailure = false;
-      _failedPath = null;
+      _failedPath = _loadedPath = null;
       _coverRevision = widget.repository.catalogUpdates.coverRevision(
         widget.drama.id,
       );
@@ -241,7 +242,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
     if (revision == _coverRevision) return;
     _coverRevision = revision;
     _retryOnFailure = true;
-    if (_coverFailed) _queueRetry();
+    _queueRetry();
   }
 
   void _queueRetry() {
@@ -251,7 +252,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       _retryQueued = false;
       if (!mounted || !_retryOnFailure) return;
       _retryOnFailure = false;
-      _retry(_failedPath);
+      _retry(_failedPath ?? _loadedPath);
     });
     WidgetsBinding.instance.ensureVisualUpdate();
   }
@@ -271,12 +272,13 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       ).evict();
     }
     if (mounted) {
+      final failed = _coverFailed;
       setState(() {
         _coverFailed = _retryOnFailure = false;
         _failedPath = null;
         _file = widget.repository.cover(
           widget.repository.catalogUpdates.current(widget.drama),
-          force: true,
+          force: failed,
         );
       });
     }
@@ -308,6 +310,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       if (snapshot.hasError || !snapshot.hasData) {
         return _failed(null);
       }
+      _loadedPath = snapshot.data;
       return Image.file(
         File(snapshot.data!),
         fit: BoxFit.cover,
@@ -330,6 +333,8 @@ class DramaTile extends StatelessWidget {
     this.onFocus,
     this.actions,
     this.badge,
+    this.countBadge,
+    this.countBadgeHighlight = false,
     this.selected,
     this.onMore,
     this.onLongPress,
@@ -342,6 +347,8 @@ class DramaTile extends StatelessWidget {
   final VoidCallback? onFocus;
   final Widget? actions;
   final String? badge;
+  final String? countBadge;
+  final bool countBadgeHighlight;
   final bool? selected;
   final VoidCallback? onMore;
   final VoidCallback? onLongPress;
@@ -396,6 +403,37 @@ class DramaTile extends StatelessWidget {
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (countBadge != null && countBadge!.isNotEmpty)
+                Positioned(
+                  right: 6,
+                  bottom: 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: countBadgeHighlight
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.black.withValues(alpha: .62),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      child: Text(
+                        countBadge!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: countBadgeHighlight
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -480,12 +518,18 @@ class DramaTile extends StatelessWidget {
       button: true,
       selected: selected,
       label: '${drama.title}，${drama.episodes}集',
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress ?? onMore,
-        onSecondaryTap: onMore,
-        borderRadius: BorderRadius.circular(14),
-        child: content,
+      child: PressScale(
+        scale: .97,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress ?? onMore,
+          onSecondaryTap: onMore,
+          borderRadius: BorderRadius.circular(14),
+          overlayColor: WidgetStateProperty.all(Colors.transparent),
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: Colors.transparent,
+          child: content,
+        ),
       ),
     );
   }

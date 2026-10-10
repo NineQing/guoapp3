@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 )
 
 var coverMetaTag = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
+var huangguoCDNDomain = regexp.MustCompile(`(?is)(?:["']?cdnDomain["']?)\s*[:=]\s*["']([^"']+)["']`)
 
 func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) (string, error) {
 	source, id, valid := splitProviderDramaID(drama.ID)
@@ -75,7 +77,7 @@ func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) 
 		}
 		return "", errors.New("详情暂未返回海报地址")
 	case sourceHuangguoAI, sourceHuangguoVideo:
-		route := "/detail/" + url.PathEscape(id) + "/"
+		route := "/video/" + url.PathEscape(id) + "/"
 		if source == sourceHuangguoAI && !rankingSourceID.MatchString(id) {
 			return "", errors.New("无效的黄果剧集 ID")
 		}
@@ -89,7 +91,11 @@ func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) 
 			}
 			route = "/" + parts[0] + "/" + url.PathEscape(parts[1])
 		}
-		pageURL := d.providerBaseURL(source) + route
+		base := d.providerBaseURL(source)
+		if source == sourceHuangguoAI {
+			base = d.huangguoAIContentBaseURL(ctx)
+		}
+		pageURL := strings.TrimRight(base, "/") + route
 		body, err := d.fetchProviderText(ctx, pageURL, d.providerBaseURL(source)+"/")
 		if err != nil {
 			return "", err
@@ -128,6 +134,66 @@ func providerCoverAddress(value any, pageURL string) string {
 		if validNativeCoverURL(address) {
 			return address.String()
 		}
+	}
+	return ""
+}
+
+func huangguoCDNBaseURL(rawHTML string) string {
+	match := huangguoCDNDomain.FindStringSubmatch(rawHTML)
+	if len(match) < 2 {
+		return ""
+	}
+	raw := strings.TrimSpace(html.UnescapeString(strings.ReplaceAll(match[1], `\/`, `/`)))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	} else if !strings.Contains(raw, "://") {
+		raw = "https://" + strings.TrimLeft(raw, "/")
+	}
+	address, err := url.Parse(raw)
+	if err != nil || !validNativeCoverURL(address) {
+		return ""
+	}
+	address.Path = ""
+	address.RawQuery = ""
+	address.Fragment = ""
+	return strings.TrimRight(address.String(), "/") + "/"
+}
+
+func huangguoArtworkAddress(value any, pageURL, rawHTML string) string {
+	switch item := value.(type) {
+	case []any:
+		for _, value := range item {
+			if address := huangguoArtworkAddress(value, pageURL, rawHTML); address != "" {
+				return address
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"url", "src", "path", "cover", "coverUrl", "cover_url", "image", "pic", "poster", "thumbnailUrl"} {
+			if address := huangguoArtworkAddress(item[key], pageURL, rawHTML); address != "" {
+				return address
+			}
+		}
+	case string:
+		raw := strings.TrimSpace(html.UnescapeString(strings.ReplaceAll(item, `\/`, `/`)))
+		if raw == "" {
+			return ""
+		}
+		address, err := url.Parse(raw)
+		if err != nil {
+			return ""
+		}
+		if address.IsAbs() || strings.HasPrefix(raw, "//") {
+			return providerCoverAddress(raw, pageURL)
+		}
+		if base := huangguoCDNBaseURL(rawHTML); base != "" {
+			if resolved := providerCoverAddress(raw, base); resolved != "" {
+				return resolved
+			}
+		}
+		return providerCoverAddress(raw, pageURL)
 	}
 	return ""
 }

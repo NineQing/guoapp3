@@ -490,7 +490,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      focusRemote(tester, find.byKey(const ValueKey('tv-nav-3')));
+      focusRemote(tester, find.byKey(const ValueKey('tv-nav-4')));
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pumpAndSettle();

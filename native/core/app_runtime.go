@@ -41,30 +41,32 @@ type Config struct {
 }
 
 type Downloader struct {
-	rankings              rankingCache
-	cfg                   Config
-	client                *http.Client
-	huangdouDetails       map[string]huangdouDetailEntry
-	huangdouDetailPending map[string]*huangdouDetailCall
-	providerMu            sync.Mutex
-	providerHosts         map[string]string
-	limiter               *requestLimiter
-	proxyRouter           *proxyRouter
-	hongguoOnce           sync.Once
-	hongguo               *hongguoAppClient
-	huangjuOnce           sync.Once
-	huangju               *huangjuAPIClient
-	yeguoOnce             sync.Once
-	yeguo                 *yeguoAPIClient
-	dsdCatalog            dsdCatalogState
-	diagnostics           *diagnosticLog
-	apiMu                 sync.Mutex
-	apiBase               string
-	apiFailures           map[string]time.Time
-	legacyOnce            sync.Once
-	legacy                *legacyAPIClient
-	previewMu             sync.Mutex
-	previewSessions       map[string]*huangguoPreviewSession
+	rankings               rankingCache
+	cfg                    Config
+	client                 *http.Client
+	huangdouDetails        map[string]huangdouDetailEntry
+	huangdouDetailPending  map[string]*huangdouDetailCall
+	providerMu             sync.Mutex
+	providerHosts          map[string]string
+	huangguoAIRoutes       []string
+	huangguoAIRouteChecked bool
+	limiter                *requestLimiter
+	proxyRouter            *proxyRouter
+	hongguoOnce            sync.Once
+	hongguo                *hongguoAppClient
+	huangjuOnce            sync.Once
+	huangju                *huangjuAPIClient
+	yeguoOnce              sync.Once
+	yeguo                  *yeguoAPIClient
+	dsdCatalog             dsdCatalogState
+	diagnostics            *diagnosticLog
+	apiMu                  sync.Mutex
+	apiBase                string
+	apiFailures            map[string]time.Time
+	legacyOnce             sync.Once
+	legacy                 *legacyAPIClient
+	previewMu              sync.Mutex
+	previewSessions        map[string]*huangguoPreviewSession
 }
 
 func defaultConfig() Config { return Config{MaxPagesPerSort: 50, PageSize: 30, Retries: 2} }
@@ -108,11 +110,14 @@ type nativeInput struct {
 	Category         string                  `json:"category"`
 	Drama            nativeDrama             `json:"drama"`
 	Chapter          Chapter                 `json:"chapter"`
+	Library          *nativeLibraryExchange  `json:"library"`
+	Payload          string                  `json:"payload"`
 	Index            int                     `json:"index"`
 	Quality          int                     `json:"quality"`
 	Session          string                  `json:"session"`
 	Sequence         int64                   `json:"sequence"`
 	Force            bool                    `json:"force"`
+	Refresh          bool                    `json:"refresh"`
 }
 
 type nativeCatalogResult struct {
@@ -160,6 +165,7 @@ type nativeEngine struct {
 	hongguoCatalog   *hongguoCatalogState
 	recommendations  map[string]nativeRecommendationState
 	catalogSaveError error
+	deferCatalogSave bool
 	sourceSaveError  error
 	covers           *nativeCoverCache
 	stream           *nativeStreamServer
@@ -280,14 +286,36 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	return engine, nil
 }
 
+const (
+	nativeRequestLimit        = 1 << 20
+	nativeLibraryRequestLimit = 48 << 20
+)
+
+func nativeRequestAction(raw string) string {
+	var probe struct {
+		Action string `json:"action"`
+	}
+	if json.Unmarshal([]byte(raw), &probe) != nil {
+		return ""
+	}
+	return probe.Action
+}
+
 func NativeRequest(raw string) (result string) {
 	defer func() {
 		if recover() != nil {
 			result = `{"ok":false,"error":"本地核心处理失败，请重试"}`
 		}
 	}()
+	limit := nativeRequestLimit
+	if len(raw) > limit && len(raw) <= nativeLibraryRequestLimit {
+		switch nativeRequestAction(raw) {
+		case "libraryImport", "libraryImportXZ":
+			limit = nativeLibraryRequestLimit
+		}
+	}
 	var input nativeInput
-	if len(raw) > 1<<20 || json.Unmarshal([]byte(raw), &input) != nil {
+	if len(raw) > limit || json.Unmarshal([]byte(raw), &input) != nil {
 		return `{"ok":false,"error":"请求格式无效"}`
 	}
 	data, err := nativeDispatch(input)
@@ -347,7 +375,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 			nativeState.engine = engine
 		}
 		nativeState.Unlock()
-		return map[string]any{"version": "0.2.17", "standalone": true, "allSources": buildAllSources == "true"}, nil
+		return map[string]any{"version": "0.2.149", "standalone": true, "allSources": buildAllSources == "true"}, nil
 	}
 	engine := nativeState.engine
 	nativeState.Unlock()
@@ -392,6 +420,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "cancelRead":
 		engine.cancelRead(input)
 		return true, nil
+	case "searchProgress":
+		return engine.nativeSearchProgress(input), nil
 	case "recommendations":
 		return engine.nativeRecommendations(ctx, input)
 	case "cachedRecommendations":
@@ -432,6 +462,37 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "localPlayback":
 		plan, _, err := engine.downloads.localPlan(input.Drama.ID, input.Index)
 		return plan, err
+	case "libraryExport":
+		return engine.nativeLibraryExport(), nil
+	case "libraryExportXZ":
+		payload, count, err := engine.nativeLibraryExportXZ()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"format": "xz", "payload": payload, "count": count}, nil
+	case "libraryImportXZ":
+		if strings.TrimSpace(input.Payload) == "" {
+			return nil, errors.New("剧库压缩包内容为空")
+		}
+		document, err := nativeLibraryImportXZ(input.Payload)
+		if err != nil {
+			return nil, err
+		}
+		if document.Version != nativeLibraryExchangeVersion {
+			return nil, errors.New("剧库文件版本不兼容")
+		}
+		if len(document.Dramas) > nativeLibraryExchangeEntries {
+			return nil, errors.New("剧库文件条目过多")
+		}
+		return engine.nativeLibraryImport(document)
+	case "libraryImport":
+		if input.Library == nil || input.Library.Version != nativeLibraryExchangeVersion {
+			return nil, errors.New("剧库文件版本不兼容")
+		}
+		if len(input.Library.Dramas) > nativeLibraryExchangeEntries {
+			return nil, errors.New("剧库文件条目过多")
+		}
+		return engine.nativeLibraryImport(*input.Library)
 	case "catalog":
 		return engine.nativeCatalog(ctx, input)
 	case "cached":
@@ -449,7 +510,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "cancelSourceJob":
 		return engine.cancelSourceTask(input.Source), nil
 	case "cover":
-		return engine.loadCover(ctx, input.Drama, input.Force)
+		return engine.loadCover(ctx, input.Drama, input.Force, input.Refresh)
 	case "prepareCover":
 		return engine.prepareCover(ctx, input.Drama)
 	case "detail":
@@ -475,6 +536,18 @@ func nativeDispatch(input nativeInput) (any, error) {
 	default:
 		return nil, errors.New("不支持的应用操作")
 	}
+}
+
+func (engine *nativeEngine) nativeSearchProgress(input nativeInput) nativeCatalogResult {
+	result := nativeCatalogResult{Items: []nativeDrama{}, Page: 1}
+	entry, ok := engine.downloader.peekHongguoSearch(input.Query)
+	if !ok {
+		return result
+	}
+	for _, drama := range entry.Dramas {
+		result.Items = append(result.Items, nativeNormalize(drama))
+	}
+	return result
 }
 
 func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput) (nativeCatalogResult, error) {
@@ -508,17 +581,28 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	d := engine.downloader
 	result := nativeCatalogResult{Items: []nativeDrama{}, Page: page}
 	if query != "" && source == sourceHongguo {
-		entry, err := d.searchHongguoDramas(ctx, query)
+		entry, hasMore, err := d.searchHongguoDramasPaged(ctx, query, page)
 		if err != nil {
 			return result, err
 		}
 		for _, drama := range entry.Dramas {
 			result.Items = append(result.Items, nativeNormalize(drama))
 		}
-		result.Warning, result.Page = entry.Warning, 1
+		result.Warning, result.Page, result.HasMore = entry.Warning, page, hasMore
 		if entry.Limited && result.Warning == "" {
-			result.Warning = "已显示当前可获取的匹配结果，使用更完整的剧名可继续查找"
+			result.Warning = "已显示当前可获取的匹配结果，可点「加载更多」继续补齐季数"
 		}
+		return result, nil
+	}
+	if query != "" && source == sourceHuangguoAI {
+		items, more, err := d.searchHuangguoAI(ctx, query, page)
+		if err != nil {
+			return result, err
+		}
+		for _, drama := range items {
+			result.Items = append(result.Items, nativeNormalize(drama))
+		}
+		result.HasMore = more
 		return result, nil
 	}
 	if query != "" && source == sourceHuangju {
@@ -554,13 +638,14 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		if !duanjuSupportsSearch(source) {
 			return result, fmt.Errorf("%s 暂不支持在线搜索，可在已加载内容中筛选", duanjuSourceName(source))
 		}
-		items, err := d.searchDuanju(ctx, source, query)
+		items, more, err := d.searchDuanjuPage(ctx, source, query, page)
 		if err != nil {
 			return result, err
 		}
 		for _, drama := range items {
 			result.Items = append(result.Items, nativeNormalize(drama))
 		}
+		result.HasMore = more
 		return result, nil
 	}
 	if query != "" {

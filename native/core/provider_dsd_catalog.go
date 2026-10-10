@@ -310,6 +310,11 @@ func (d *Downloader) fetchDSDCatalogPage(ctx context.Context, page int, category
 		group.Add(1)
 		go func(index int, category nativeCategory) {
 			defer group.Done()
+			defer func() {
+				if recover() != nil {
+					results[index].err = errors.New("帝果分类处理失败")
+				}
+			}()
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
