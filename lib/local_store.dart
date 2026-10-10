@@ -474,6 +474,7 @@ class LocalStore extends ChangeNotifier {
     if (allSourcesEnabled) return Future<void>.value();
     return _setting('liveActivated', value);
   }
+
   Future<void> setGreenMode(bool value) => _setting('greenMode', value);
   Future<void> setFullMode(bool value) async {
     if (!allSourcesEnabled) return;
@@ -1217,11 +1218,13 @@ class LocalStore extends ChangeNotifier {
           final values = raw == null
               ? null
               : (jsonDecode(raw) as Map)['values'] as Map;
-          final records = jsonDecode(
-            (values?['profiles'] as String?) ??
-                preferences.getString('profiles') ??
-                '[]',
-          ) as List;
+          final records =
+              jsonDecode(
+                    (values?['profiles'] as String?) ??
+                        preferences.getString('profiles') ??
+                        '[]',
+                  )
+                  as List;
           for (final row in records) {
             if (row is Map && row['admin'] == true) {
               originalAdmin = LocalProfile.fromJson(
@@ -1230,8 +1233,9 @@ class LocalStore extends ChangeNotifier {
             }
           }
         } catch (_) {}
-        final backupAdmin = _readProfiles(data['profiles'])
-            .firstWhere((profile) => profile.admin);
+        final backupAdmin = _readProfiles(
+          data['profiles'],
+        ).firstWhere((profile) => profile.admin);
         final verifier = originalAdmin?.protected == true
             ? originalAdmin!
             : backupAdmin;
