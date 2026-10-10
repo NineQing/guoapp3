@@ -47,6 +47,7 @@ jobs:
         run: |
           cp pubspec.android6.yaml pubspec.yaml
           python scripts/prepare_android6_toolchain.py
+          python scripts/prepare_android6_sources.py
       - name: Configure Android signing
         run: python scripts/configure_signing.py
         env:

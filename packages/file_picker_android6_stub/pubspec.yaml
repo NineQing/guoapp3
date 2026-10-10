@@ -1,0 +1,8 @@
+name: file_picker
+description: Android 6 compatibility placeholder for local file selection.
+publish_to: none
+version: 13.1.0
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+
