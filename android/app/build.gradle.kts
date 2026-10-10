@@ -16,6 +16,11 @@ val allSources = dartDefines["ALL_SOURCES"] == "true"
 val android6Compatibility = dartDefines["ANDROID6_COMPAT"] == "true"
 val editionLabel = if (allSources) "真果鉴" else "红果鉴"
 val appLabel = editionLabel + if (android6Compatibility) "兼容版" else ""
+val appId = when {
+    android6Compatibility -> "com.duanju.duanju_app.android6"
+    allSources -> "com.duanju.duanju_app.zhenguojian"
+    else -> "com.duanju.duanju_app"
+}
 
 val releaseKey = rootProject.file("key.properties")
 val releaseProperties = Properties()
@@ -34,11 +39,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = if (android6Compatibility) {
-            "com.duanju.duanju_app.android6"
-        } else {
-            "com.duanju.duanju_app"
-        }
+        applicationId = appId
         minSdk = if (android6Compatibility) 23 else 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

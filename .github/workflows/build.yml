@@ -72,12 +72,16 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;28.2.13676358"
       - name: Configure Android signing
-        run: python scripts/configure_signing.py
+        run: python scripts/configure_signing.py --edition ${{ matrix.edition }}
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_HONGGUOJIAN_KEYSTORE_BASE64: ${{ secrets.ANDROID_HONGGUOJIAN_KEYSTORE_BASE64 }}
+          ANDROID_HONGGUOJIAN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_HONGGUOJIAN_KEYSTORE_PASSWORD }}
+          ANDROID_HONGGUOJIAN_KEY_ALIAS: ${{ secrets.ANDROID_HONGGUOJIAN_KEY_ALIAS }}
+          ANDROID_HONGGUOJIAN_KEY_PASSWORD: ${{ secrets.ANDROID_HONGGUOJIAN_KEY_PASSWORD }}
+          ANDROID_ZHENGUOJIAN_KEYSTORE_BASE64: ${{ secrets.ANDROID_ZHENGUOJIAN_KEYSTORE_BASE64 }}
+          ANDROID_ZHENGUOJIAN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ZHENGUOJIAN_KEYSTORE_PASSWORD }}
+          ANDROID_ZHENGUOJIAN_KEY_ALIAS: ${{ secrets.ANDROID_ZHENGUOJIAN_KEY_ALIAS }}
+          ANDROID_ZHENGUOJIAN_KEY_PASSWORD: ${{ secrets.ANDROID_ZHENGUOJIAN_KEY_PASSWORD }}
       - run: python scripts/build_android.py ${{ matrix.arguments }}
       - name: Remove signing files
         if: always()

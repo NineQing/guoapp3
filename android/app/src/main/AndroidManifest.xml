@@ -24,7 +24,7 @@
         android:allowBackup="false"
         android:requestLegacyExternalStorage="true">
         <activity
-            android:name=".MainActivity"
+            android:name="com.duanju.duanju_app.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -39,7 +39,7 @@
                 android:resource="@style/NormalTheme"/>
             </activity>
         <activity-alias
-            android:name=".LauncherGreen"
+            android:name="com.duanju.duanju_app.LauncherGreen"
             android:enabled="true"
             android:exported="true"
             android:icon="@drawable/app_icon"
@@ -54,7 +54,7 @@
             </intent-filter>
         </activity-alias>
         <activity-alias
-            android:name=".LauncherFull"
+            android:name="com.duanju.duanju_app.LauncherFull"
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_full"

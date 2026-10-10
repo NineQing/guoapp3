@@ -131,8 +131,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun setLauncherEdition(full: Boolean): Boolean {
-        val green = ComponentName(this, "$packageName.LauncherGreen")
-        val complete = ComponentName(this, "$packageName.LauncherFull")
+        val launcherPackage = MainActivity::class.java.name.substringBeforeLast('.')
+        val green = ComponentName(this, "$launcherPackage.LauncherGreen")
+        val complete = ComponentName(this, "$launcherPackage.LauncherFull")
         val wanted = if (full) complete else green
         val dropped = if (full) green else complete
         packageManager.setComponentEnabledSetting(

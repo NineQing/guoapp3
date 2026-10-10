@@ -1,8 +1,8 @@
 # 红果鉴 / 真果鉴
 
-Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.150+2162（未验证开发快照）**。本轮在保留红果鉴默认版和现有构建流程的前提下，追加 Android 6 独立兼容版构建入口；完整主版本的直播、推荐与搜索缓存、剧库导入导出、播放器生命周期与玻璃界面、网络出口切换、屏幕常亮、观看统计、断点续传与新增站源解析等功能继续保留。
+Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.150+2163（未验证开发快照）**。本轮在保留红果鉴默认版和现有构建流程的前提下，追加 Android 6 独立兼容版构建入口，并为红果鉴与真果鉴配置独立 Android 包名和发布签名；完整主版本的直播、推荐与搜索缓存、剧库导入导出、播放器生命周期与玻璃界面、网络出口切换、屏幕常亮、观看统计、断点续传与新增站源解析等功能继续保留。
 
-按用户 2026-09-21 的要求，继续暂停整体验证。0.2.51 的 GitHub Actions 构建、打包和 Release 记录保留，现有 `.github/workflows/build.yml` 未改动；0.2.150+2162 尚未重新构建或上传安装包。启动、榜单、画质增强、站源改名、画中画、连续播放控制栏、红果系列剧提醒、播放器 Tab 化、首页 / 播放页优化、多站源站源修复、十二个新增站源、直播、推荐、剧库传输、播放器生命周期、历史记录批量删除和 Android 6 兼容版均保留未验证快照状态。
+按用户 2026-09-21 的要求，继续暂停整体验证。0.2.51 的 GitHub Actions 构建、打包和 Release 记录保留；本次仅补充两版 Android 的包名与签名选择，checks、构建矩阵和 Release 上传流程保持原有规则。0.2.150+2163 等待 GitHub Actions 远程构建。启动、榜单、画质增强、站源改名、画中画、连续播放控制栏、红果系列剧提醒、播放器 Tab 化、首页 / 播放页优化、多站源站源修复、十二个新增站源、直播、推荐、剧库传输、播放器生命周期、历史记录批量删除和 Android 6 兼容版均保留未验证快照状态。
 
 | 编译方式 | 应用名称 | 可用站源 |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、�
 
 这是编译选项，应用内不能切换版本。标题、Android 桌面名称与电视横幅、Windows 窗口与分发文件名、iOS 显示名随编译选项变化。界面、站源调用、原生下载调度同时限制可用站源；红果版不会访问或继续执行其他站源的旧任务。
 
-两版保留原 Android / iOS 应用标识及数据目录；Android 使用同一签名可相互覆盖升级，不能作为两个独立正式应用并排安装。Windows 沿用原内部产品标识与数据目录。切换版本保留追剧、观看记录、用户权限和下载记录；红果版隐藏其他站源内容，恢复全站源版后可继续使用。备份格式也保持兼容。
+红果鉴 Android 包名为 `com.duanju.duanju_app`，真果鉴 Android 包名为 `com.duanju.duanju_app.zhenguojian`，两者使用不同的固定发布签名，可以在同一台手机上同时安装；Android 6 兼容版继续使用 `com.duanju.duanju_app.android6`。首次从旧的同包名真果鉴安装包切换到新包名时需要先卸载旧真果鉴，红果鉴现有包名保持不变。Windows 沿用原内部产品标识与数据目录，iOS 仍沿用原应用标识。切换版本保留追剧、观看记录、用户权限和下载记录；红果版隐藏其他站源内容，恢复全站源版后可继续使用。备份格式也保持兼容。
 
 ### Android 6 兼容版
 
@@ -673,27 +673,30 @@ Actions 分别传入默认参数与 `--all-sources` 构建两版，Flutter 和 G
 
 **Build Android 6 compatibility package** 仅在手动运行或推送 `android6-*` 标签时执行。它使用 `pubspec.android6.yaml`、Flutter `3.35.7` 和 Android API 23 原生编译，产物为 `hongguojian-android6-版本-ABI.apk`，上传到 `android6-版本` Release 和 `hongguojian-android6` Artifact；现有 **Build app packages** 工作流及其 Release 规则不变。
 
-Android 正式发布持续使用同一签名并递增构建号，在仓库 Secrets 配置：
+Android 正式发布按版本使用固定独立签名并递增构建号，在仓库 Secrets 配置：
 
 | Secret | 内容 |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | JKS 文件 Base64 |
-| `ANDROID_KEYSTORE_PASSWORD` | 签名文件密码 |
-| `ANDROID_KEY_ALIAS` | 密钥别名 |
-| `ANDROID_KEY_PASSWORD` | 密钥密码 |
+| `ANDROID_HONGGUOJIAN_KEYSTORE_BASE64` / `ANDROID_ZHENGUOJIAN_KEYSTORE_BASE64` | 对应版本 JKS 文件 Base64 |
+| `ANDROID_HONGGUOJIAN_KEYSTORE_PASSWORD` / `ANDROID_ZHENGUOJIAN_KEYSTORE_PASSWORD` | 对应版本签名文件密码 |
+| `ANDROID_HONGGUOJIAN_KEY_ALIAS` / `ANDROID_ZHENGUOJIAN_KEY_ALIAS` | 对应版本密钥别名 |
+| `ANDROID_HONGGUOJIAN_KEY_PASSWORD` / `ANDROID_ZHENGUOJIAN_KEY_PASSWORD` | 对应版本密钥密码 |
+
+Android 6 兼容工作流继续读取 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD`；它们应与红果鉴签名保持一致。
 
 未配置时生成预览 APK，不同构建机的预览签名可能无法相互覆盖。创建签名文件并保存到项目外：
 
 ~~~sh
+keytool -genkeypair -v -keystore hongguojian-release.jks -storetype JKS -alias hongguojian -keyalg RSA -keysize 2048 -validity 10000
 keytool -genkeypair -v -keystore zhenguojian-release.jks -storetype JKS -alias zhenguojian -keyalg RSA -keysize 2048 -validity 10000
 ~~~
 
 本地不入库的 `android/key.properties`：
 
 ~~~properties
-storeFile=/absolute/path/zhenguojian-release.jks
+storeFile=/absolute/path/hongguojian-release.jks
 storePassword=你的密码
-keyAlias=zhenguojian
+keyAlias=hongguojian
 keyPassword=你的密码
 ~~~
 

@@ -6,6 +6,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--clean', action='store_true')
+parser.add_argument('--edition', choices=['hongguojian', 'zhenguojian'], default='hongguojian')
 options = parser.parse_args()
 runner_temp = os.environ.get('RUNNER_TEMP')
 if not runner_temp:
@@ -18,9 +19,11 @@ if options.clean:
         properties_file.unlink(missing_ok=True)
     raise SystemExit(0)
 
-names = ['ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD',
-         'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD']
-values = [os.environ.get(name, '') for name in names]
+suffixes = ['KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD']
+edition_prefix = 'ANDROID_' + options.edition.upper() + '_'
+values = [os.environ.get(edition_prefix + suffix, '') for suffix in suffixes]
+if options.edition == 'hongguojian' and not any(values):
+    values = [os.environ.get('ANDROID_' + suffix, '') for suffix in suffixes]
 if not any(values):
     print('未配置签名 Secrets：生成预览 APK；正式发布请配置固定签名。')
     raise SystemExit(0)
@@ -29,7 +32,7 @@ if not all(values):
 try:
     data = base64.b64decode(''.join(values[0].split()), validate=True)
 except ValueError:
-    raise SystemExit('ANDROID_KEYSTORE_BASE64 不是有效的 Base64。')
+    raise SystemExit(edition_prefix + 'KEYSTORE_BASE64 不是有效的 Base64。')
 if not data:
     raise SystemExit('Android 签名文件为空。')
 key_file.write_bytes(data)
