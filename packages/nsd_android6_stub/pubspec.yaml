@@ -1,0 +1,12 @@
+name: nsd
+description: Android 6 compatibility placeholder for local network discovery.
+publish_to: none
+version: 5.0.1
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter

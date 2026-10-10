@@ -24,7 +24,7 @@ dependencies:
   crypto: 3.0.7
   window_manager: 0.5.1
   wakelock_plus: 1.3.3
-  nsd: 4.1.0
+  nsd: 5.0.1
 
 dev_dependencies:
   flutter_test:
@@ -40,6 +40,8 @@ dependency_overrides:
     path: packages/ffmpeg_kit_flutter_new_min_gpl_android6_stub
   file_picker:
     path: packages/file_picker_android6_stub
+  nsd:
+    path: packages/nsd_android6_stub
   media_kit_libs_windows_video:
     path: packages/media_kit_libs_windows_video_android6_stub
 
