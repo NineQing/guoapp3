@@ -2,6 +2,15 @@ from pathlib import Path
 
 
 root = Path(__file__).resolve().parents[1]
+app = root / 'android' / 'app' / 'build.gradle.kts'
+app_text = app.read_text(encoding='utf-8').replace(
+    '    id("com.android.application")\n    id("dev.flutter.flutter-gradle-plugin")',
+    '    id("com.android.application")\n'
+    '    id("org.jetbrains.kotlin.android")\n'
+    '    id("dev.flutter.flutter-gradle-plugin")',
+)
+app.write_text(app_text, encoding='utf-8')
+
 settings = root / 'android' / 'settings.gradle.kts'
 settings_text = settings.read_text(encoding='utf-8')
 settings_text = settings_text.replace(
