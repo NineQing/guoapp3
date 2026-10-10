@@ -146,7 +146,7 @@ Future<void> showSleepTimerSheet(
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: Colors.black26,
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
