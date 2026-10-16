@@ -46,6 +46,8 @@ android {
         versionName = flutter.versionName
         manifestPlaceholders["appLabel"] = appLabel
         manifestPlaceholders["appLabelFull"] = appLabel
+        manifestPlaceholders["appIcon"] =
+            if (allSources) "@mipmap/ic_launcher_full" else "@drawable/app_icon"
         manifestPlaceholders["appBanner"] = if (allSources) "@drawable/tv_banner_all_sources" else "@drawable/tv_banner"
         manifestPlaceholders["appBannerFull"] = if (allSources) "@drawable/tv_banner_all_sources" else "@drawable/tv_banner"
     }
