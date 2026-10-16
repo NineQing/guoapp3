@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--clean', action='store_true')
 parser.add_argument('--edition', choices=['hongguojian', 'zhenguojian'], default='hongguojian')
+parser.add_argument('--require-signing', action='store_true')
 options = parser.parse_args()
 runner_temp = os.environ.get('RUNNER_TEMP')
 if not runner_temp:
@@ -25,6 +26,8 @@ values = [os.environ.get(edition_prefix + suffix, '') for suffix in suffixes]
 if options.edition == 'hongguojian' and not any(values):
     values = [os.environ.get('ANDROID_' + suffix, '') for suffix in suffixes]
 if not any(values):
+    if options.require_signing:
+        raise SystemExit('正式 Android 发布必须配置固定签名 Secrets。')
     print('未配置签名 Secrets：生成预览 APK；正式发布请配置固定签名。')
     raise SystemExit(0)
 if not all(values):

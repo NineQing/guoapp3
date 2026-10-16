@@ -72,7 +72,12 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;28.2.13676358"
       - name: Configure Android signing
-        run: python scripts/configure_signing.py --edition ${{ matrix.edition }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            python scripts/configure_signing.py --edition ${{ matrix.edition }}
+          else
+            python scripts/configure_signing.py --edition ${{ matrix.edition }} --require-signing
+          fi
         env:
           ANDROID_HONGGUOJIAN_KEYSTORE_BASE64: ${{ secrets.ANDROID_HONGGUOJIAN_KEYSTORE_BASE64 }}
           ANDROID_HONGGUOJIAN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_HONGGUOJIAN_KEYSTORE_PASSWORD }}
@@ -87,6 +92,7 @@ jobs:
         if: always()
         run: python scripts/configure_signing.py --clean
       - name: Publish Android APK to GitHub Release
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

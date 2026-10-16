@@ -53,12 +53,18 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+        }
         if (releaseKey.exists()) {
             create("release") {
                 storeFile = file(requireNotNull(releaseProperties.getProperty("storeFile")))
                 storePassword = requireNotNull(releaseProperties.getProperty("storePassword"))
                 keyAlias = requireNotNull(releaseProperties.getProperty("keyAlias"))
                 keyPassword = requireNotNull(releaseProperties.getProperty("keyPassword"))
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
