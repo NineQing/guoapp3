@@ -8,6 +8,7 @@ import 'core_bridge.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
+import 'resource_settings.dart';
 import 'source_status.dart';
 
 String sourceTimestamp(DateTime? value) {
@@ -313,7 +314,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
                           ),
                           DropdownButtonFormField<String>(
                             initialValue: _hongguoPlayMode,
-                            decoration: const InputDecoration(labelText: '播放红果源'),
+                            decoration: const InputDecoration(
+                              labelText: '播放红果源',
+                            ),
                             items: const [
                               DropdownMenuItem(
                                 value: '1',
