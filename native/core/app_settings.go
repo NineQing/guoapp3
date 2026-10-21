@@ -20,13 +20,12 @@ type nativeResourceSettings struct {
 	CatalogIntervalMS   int    `json:"catalogIntervalMs"`
 	DownloadConcurrency int    `json:"downloadConcurrency"`
 	DownloadBySource    bool   `json:"downloadBySource"`
-	HongguoPlayMode     string `json:"hongguoPlayMode"`
 	Warning             string `json:"warning,omitempty"`
 	SystemProxyStatus   string `json:"systemProxyStatus,omitempty"`
 }
 
 func defaultResourceSettings() nativeResourceSettings {
-	return nativeResourceSettings{ProxyMode: "auto", CatalogConcurrency: 3, CatalogIntervalMS: 250, DownloadConcurrency: 2, HongguoPlayMode: hongguoPlayModeWebFirst}
+	return nativeResourceSettings{ProxyMode: "auto", CatalogConcurrency: 3, CatalogIntervalMS: 250, DownloadConcurrency: 2}
 }
 
 func (settings nativeResourceSettings) validate() error {
@@ -37,9 +36,6 @@ func (settings nativeResourceSettings) validate() error {
 	}
 	if settings.ProxyMode != "auto" && settings.ProxyMode != "direct" && settings.ProxyMode != "manual" {
 		return errors.New("代理模式无效")
-	}
-	if settings.HongguoPlayMode != "" && settings.HongguoPlayMode != hongguoPlayModeAppFirst && settings.HongguoPlayMode != hongguoPlayModeWebFirst {
-		return errors.New("红果播放形式无效")
 	}
 	if settings.ProxyMode == "manual" || settings.ProxyURL != "" {
 		if len(settings.ProxyURL) > 2048 {
@@ -144,14 +140,6 @@ func (engine *nativeEngine) applyResourceSettings(settings nativeResourceSetting
 		engine.downloads.scheduleLocked()
 		engine.downloads.mu.Unlock()
 	}
-	mode := settings.HongguoPlayMode
-	if mode != hongguoPlayModeAppFirst {
-		mode = hongguoPlayModeWebFirst
-	}
-	downloader := engine.downloader
-	downloader.hongguoPlayMu.Lock()
-	downloader.hongguoPlaySetting = mode
-	downloader.hongguoPlayMu.Unlock()
 }
 
 func (engine *nativeEngine) saveResourceSettings(settings nativeResourceSettings) (nativeResourceSettings, error) {

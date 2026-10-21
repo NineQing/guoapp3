@@ -8,7 +8,6 @@ import 'core_bridge.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
-import 'resource_settings.dart';
 import 'source_status.dart';
 
 String sourceTimestamp(DateTime? value) {
@@ -67,17 +66,12 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Timer? _timer;
   bool _polling = false;
   int _ticks = 0;
-  ResourceSettings? _resource;
-  String _hongguoPlayMode = '2';
-  bool _savingPlayMode = false;
-  String? _playModeError;
 
   @override
   void initState() {
     super.initState();
     ensureTelevisionFocus(context);
     unawaited(_refresh());
-    unawaited(_loadResource());
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _ticks++;
       if (_statuses.values.any((status) => status.retryAt != null)) {
@@ -89,54 +83,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
         unawaited(_refresh());
       }
     });
-  }
-
-  Future<void> _loadResource() async {
-    try {
-      final settings = await widget.repository.resourceSettings();
-      if (!mounted) return;
-      setState(() {
-        _resource = settings;
-        _hongguoPlayMode = settings.hongguoPlayMode;
-        _playModeError = null;
-      });
-    } catch (error) {
-      if (mounted) setState(() => _playModeError = error.toString());
-    }
-  }
-
-  Future<void> _saveHongguoPlayMode(String mode) async {
-    final current = _resource;
-    if (current == null || _savingPlayMode) return;
-    setState(() {
-      _savingPlayMode = true;
-      _playModeError = null;
-    });
-    try {
-      final saved = await widget.repository.saveResourceSettings(
-        ResourceSettings(
-          proxyMode: current.proxyMode,
-          proxyUrl: current.proxyUrl,
-          catalogConcurrency: current.catalogConcurrency,
-          catalogIntervalMs: current.catalogIntervalMs,
-          downloadConcurrency: current.downloadConcurrency,
-          downloadBySource: current.downloadBySource,
-          hongguoPlayMode: mode,
-        ),
-      );
-      if (!mounted) return;
-      setState(() {
-        _resource = saved;
-        _hongguoPlayMode = saved.hongguoPlayMode;
-        _savingPlayMode = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _savingPlayMode = false;
-        _playModeError = error.toString();
-      });
-    }
   }
 
   @override
@@ -297,53 +243,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
               child: ListView(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
                 children: [
-                  Card(
-                    key: const ValueKey('hongguo-play-mode-entry'),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    clipBehavior: Clip.antiAlias,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(Icons.play_circle_outline),
-                            title: Text('红果源播放形式'),
-                            subtitle: Text('切换红果的取流算法实现，默认使用本项目的网页优先实现。'),
-                          ),
-                          DropdownButtonFormField<String>(
-                            initialValue: _hongguoPlayMode,
-                            decoration: const InputDecoration(
-                              labelText: '播放红果源',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: '1',
-                                child: Text('播放红果源1 · App 优先（移植实现）'),
-                              ),
-                              DropdownMenuItem(
-                                value: '2',
-                                child: Text('播放红果源2 · 网页优先（默认）'),
-                              ),
-                            ],
-                            onChanged: _savingPlayMode
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      unawaited(_saveHongguoPlayMode(value));
-                                    }
-                                  },
-                          ),
-                          if (_playModeError != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(_playModeError!),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(

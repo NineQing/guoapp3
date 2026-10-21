@@ -14,14 +14,12 @@ class ResourceSettings {
     this.catalogIntervalMs = 250,
     this.downloadConcurrency = 2,
     this.downloadBySource = false,
-    this.hongguoPlayMode = '2',
     this.warning = '',
     this.systemProxyStatus = '',
   });
   final String proxyMode, proxyUrl, warning, systemProxyStatus;
   final int catalogConcurrency, catalogIntervalMs, downloadConcurrency;
   final bool downloadBySource;
-  final String hongguoPlayMode;
 
   factory ResourceSettings.fromJson(Map<String, dynamic> data) =>
       ResourceSettings(
@@ -31,7 +29,6 @@ class ResourceSettings {
         catalogIntervalMs: intValue(data['catalogIntervalMs']),
         downloadConcurrency: intValue(data['downloadConcurrency']),
         downloadBySource: data['downloadBySource'] == true,
-        hongguoPlayMode: data['hongguoPlayMode'] as String? ?? '2',
         warning: data['warning'] as String? ?? '',
         systemProxyStatus: data['systemProxyStatus'] as String? ?? '',
       );
@@ -43,7 +40,6 @@ class ResourceSettings {
     'catalogIntervalMs': catalogIntervalMs,
     'downloadConcurrency': downloadConcurrency,
     'downloadBySource': downloadBySource,
-    'hongguoPlayMode': hongguoPlayMode,
   };
 }
 
