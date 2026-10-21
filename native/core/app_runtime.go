@@ -67,6 +67,8 @@ type Downloader struct {
 	legacy                 *legacyAPIClient
 	previewMu              sync.Mutex
 	previewSessions        map[string]*huangguoPreviewSession
+	hongguoPlayMu         sync.RWMutex
+	hongguoPlaySetting    string
 }
 
 func defaultConfig() Config { return Config{MaxPagesPerSort: 50, PageSize: 30, Retries: 2} }

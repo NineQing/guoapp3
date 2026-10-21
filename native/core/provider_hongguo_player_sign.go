@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math/bits"
 	"net/http"
 	"strconv"
@@ -22,11 +23,37 @@ func newHongguoPlayerNonce() (hongguoPlayerNonce, error) {
 	return nonce, err
 }
 
-func signHongguoPlayerRequest(request *http.Request, body []byte, now time.Time, installID string, nonce hongguoPlayerNonce) {
-	signHongguoRequest(request, body, now)
-	timestamp := uint32(now.Unix())
-	request.Header.Set("X-Argus", hongguoPlayerArgus(request.URL.RawQuery, body, timestamp, installID, nonce))
-	request.Header.Set("X-Ladon", hongguoPlayerLadon(request.URL.Query().Get("aid"), timestamp, nonce[2:6]))
+func signHongguoPlayerRequest(request *http.Request, body []byte, now time.Time, installID string) {
+	stamp := uint32(now.Unix())
+	queryHash := md5.Sum([]byte(request.URL.RawQuery))
+	var payload [20]byte
+	copy(payload[:4], queryHash[:4])
+	if body != nil {
+		bodyHash := md5.Sum(body)
+		copy(payload[4:8], bodyHash[:4])
+		request.Header.Set("X-SS-STUB", fmt.Sprintf("%X", bodyHash))
+	}
+	copy(payload[12:16], []byte{0, 6, 11, 28})
+	binary.BigEndian.PutUint32(payload[16:], stamp)
+	key := [...]byte{0x44, 0xb9, 0xb9, 0xd9, 0xa4, 0xae, 0xf9, 0xfc, 0xa4, 0x93, 0xaa, 0x75, 0x7c, 0xa3, 0xc2, 0xc4, 0xa4, 0x96, 0x93, 0x8f}
+	for index := range payload {
+		payload[index] ^= key[index]
+	}
+	for index := range payload {
+		mixed := bits.RotateLeft8(payload[index], 4) ^ payload[(index+1)%len(payload)]
+		payload[index] = bits.Reverse8(mixed) ^ 0xff ^ byte(len(payload))
+	}
+	signature := append([]byte{0x84, 0x04, 0x40, 0x1c, 0, 0}, payload[:]...)
+	request.Header.Set("X-Khronos", strconv.FormatUint(uint64(stamp), 10))
+	request.Header.Set("X-Gorgon", hex.EncodeToString(signature))
+	request.Header.Set("X-SS-Req-Ticket", strconv.FormatInt(now.UnixMilli(), 10))
+
+	nonce, err := newHongguoPlayerNonce()
+	if err != nil {
+		return
+	}
+	request.Header.Set("X-Argus", hongguoPlayerArgus(request.URL.RawQuery, body, stamp, installID, nonce))
+	request.Header.Set("X-Ladon", hongguoPlayerLadon(request.URL.Query().Get("aid"), stamp, nonce[2:6]))
 }
 
 func hongguoPlayerArgus(query string, body []byte, timestamp uint32, installID string, nonce hongguoPlayerNonce) string {

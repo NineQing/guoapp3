@@ -17,50 +17,56 @@ func (downloader *Downloader) resolveHongguoAppMedia(ctx context.Context, videoI
 		return providerMedia{}, errors.New("红果视频 ID 无效")
 	}
 	payload := map[string]any{
-		"video_id": videoID, "content_type": 1,
-		"biz_param": map[string]any{"need_all_video_definition": true, "video_platform": 3},
+		"biz_param": map[string]any{
+			"detail_page_version": 0, "device_level": 3, "disable_digg_stat": false,
+			"need_all_video_definition": true, "need_mp4_align": false,
+			"use_os_player": false, "use_server_dns": false, "video_platform": 1024,
+		},
+		"dr_scene": "preload",
+		"mixed_video_id_map": map[string]any{"1004": []string{videoID}},
 	}
-	result, err := downloader.hongguoAppRequest(ctx, http.MethodPost, "/novel/player/video_model/v1/", nil, payload)
+	result, err := downloader.hongguoAppRequest(ctx, http.MethodPost, "/novel/player/multi_video_model/preload/v1", nil, payload)
 	if err != nil {
 		return providerMedia{}, err
 	}
 	data := nestedMap(result, "data")
-	model, _ := data["video_model"].(map[string]any)
-	if encoded, ok := data["video_model"].(string); ok && encoded != "" {
-		decodeModel := func(value string) (map[string]any, error) {
-			var decoded map[string]any
-			decoder := json.NewDecoder(strings.NewReader(value))
-			decoder.UseNumber()
-			if err := decoder.Decode(&decoded); err != nil {
-				return nil, err
-			}
-			return decoded, nil
-		}
-		decoded, err := decodeModel(encoded)
-		if err != nil {
-			payload, decodeErr := decodeHongguoBase64(encoded)
-			if decodeErr != nil || len(payload) == 0 {
-				return providerMedia{}, errors.New("红果 App 播放信息格式异常")
-			}
-			decoded, err = decodeModel(string(payload))
-		}
-		if err != nil || decoded == nil {
-			return providerMedia{}, errors.New("红果 App 播放信息格式异常")
-		}
-		model = decoded
+	if data == nil {
+		return providerMedia{}, errors.New("红果 App 批量取流接口未返回数据")
 	}
-	if len(model) == 0 {
-		_, hasList := data["video_list"].([]any)
-		rows, hasMap := data["video_list"].(map[string]any)
-		if hasList && len(anyList(data["video_list"])) > 0 || hasMap && len(rows) > 0 {
-			model = map[string]any{
-				"video_list":     data["video_list"],
-				"video_duration": data["video_duration"],
-				"duration":       data["duration"],
+	entry, _ := data[videoID].(map[string]any)
+	if len(entry) == 0 {
+		for _, value := range data {
+			if item, ok := value.(map[string]any); ok && nestedMap(item, "video_model") != nil {
+				entry = item
+				break
 			}
 		}
+	}
+	model := parseHongguoAppModel(entry)
+	if len(model) == 0 {
+		return providerMedia{}, errors.New("红果 App 批量取流接口未返回本集片源模型")
 	}
 	return selectHongguoAppMedia(model)
+}
+
+func parseHongguoAppModel(entry map[string]any) map[string]any {
+	if entry == nil {
+		return nil
+	}
+	if model, ok := entry["video_model"].(map[string]any); ok {
+		return model
+	}
+	encoded, ok := entry["video_model"].(string)
+	if !ok {
+		return nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(encoded))
+	decoder.UseNumber()
+	var model map[string]any
+	if err := decoder.Decode(&model); err != nil {
+		return nil
+	}
+	return model
 }
 
 func selectHongguoAppMedia(model map[string]any) (providerMedia, error) {
